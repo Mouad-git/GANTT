@@ -9,16 +9,61 @@ const mongoose = require("mongoose");
 const cors     = require("cors");
 const bcrypt   = require("bcryptjs");
 const jwt      = require("jsonwebtoken");
+const multer  = require("multer");
+const path    = require("path");
+const fs      = require("fs");
+
+// 1. INITIALISATION DE L'APP (Indispensable au tout début)
+const app = express();
+
+// Configuration CORS - Ajout de ton URL Vercel correcte
+app.use(cors({
+  origin: [
+    'http://localhost:5173', 
+    'https://gantt-pied.vercel.app', 
+    'https://m2s-formaplan.vercel.app',
+    'https://sparkling-empathy-production-05b3.up.railway.app'
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
+}));
+
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+// Dossier uploads
+const UPLOADS_DIR = path.join(__dirname, "uploads");
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+  filename:    (req, file, cb) => {
+    const ext  = path.extname(file.originalname).toLowerCase();
+    const name = `logo_${Date.now()}${ext}`;
+    cb(null, name);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = [".png", ".jpg", ".jpeg", ".svg", ".webp"];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowed.includes(ext));
+  },
+});
+
+// Servir les fichiers statiques
+app.use("/uploads", express.static(UPLOADS_DIR));
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_super_secret_key_123!";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
-
 
 // ─────────────────────────────────────────────────────────────
 // 2. MODÈLES MONGOOSE
 // ─────────────────────────────────────────────────────────────
 
-// ── User (Auth) ───────────────────────────────────────────────
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true, index: true },
   password: { type: String, required: true },
@@ -28,14 +73,11 @@ const UserSchema = new mongoose.Schema({
   permissions: {
     canImportExcel: { type: Boolean, default: true },
     canViewDocs: { type: Boolean, default: true },
-    allowedDocTypes: { type: [String], default: [] } // <── AJOUTEZ CETTE LIGNE
+    allowedDocTypes: { type: [String], default: [] } 
   }
 }, { timestamps: true });
 
 const User = mongoose.model("User", UserSchema);
-
-
-
 
 async function initAdmin() {
   const adminExists = await User.findOne({ username: "admin" });
@@ -68,6 +110,7 @@ const VacanceSchema = new mongoose.Schema({
 }, { _id: false });
 
 const WorkspaceSchema = new mongoose.Schema({
+  logoUrl: { type: String, default: "" },
   name:         { type: String, required: true, trim: true },
   owner:        { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   description:  { type: String, default: "" },
@@ -255,15 +298,6 @@ const ExportBase = mongoose.model("ExportBase", ExportBaseSchema);
 // ─────────────────────────────────────────────────────────────
 // 3. APP EXPRESS
 // ─────────────────────────────────────────────────────────────
-const app = express();
-
-app.use(cors({
-  origin: ['http://localhost:5173', 'https://sparkling-empathy-production-05b3.up.railway.app', 'https://m2s-formaplan.vercel.app'],
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // ─────────────────────────────────────────────────────────────
 // 4. HELPERS
@@ -581,10 +615,11 @@ app.post("/api/workspaces", async (req, res, next) => {
 
 app.put("/api/workspaces/:id", async (req, res, next) => {
   try {
-    const { company, name, startDate, endDate, workingDays, skipHolidays, vacances, ...rest } = req.body;
+    const { company, logoUrl, name, startDate, endDate, workingDays, skipHolidays, vacances, ...rest } = req.body;
     const update = { ...rest };
     if (company)              update.name         = company;
     if (name)                 update.name         = name;
+    if (logoUrl !== undefined) update.logoUrl = logoUrl;  // ← ajout
     if (startDate !== undefined) update.startDate = startDate;
     if (endDate   !== undefined) update.endDate   = endDate;
     if (workingDays  !== undefined) update.workingDays  = workingDays;
@@ -635,6 +670,48 @@ app.delete("/api/workspaces/:id", async (req, res, next) => {
       ExportBase.findOneAndDelete({ workspaceId: wsId }),
     ]);
     res.json({ success: true, message: "Workspace et toutes ses données supprimés" });
+  } catch (e) { next(e); }
+});
+
+// POST /api/workspaces/:wsId/logo
+app.post("/api/workspaces/:wsId/logo", authenticateToken, upload.single("logo"), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: "Fichier manquant ou type non supporté" });
+
+    const wsId   = req.params.wsId;
+    const logoUrl = `/uploads/${req.file.filename}`;
+
+    // Supprimer l'ancien logo si existant
+    const ws = await Workspace.findById(wsId);
+    if (ws?.logoUrl) {
+      const oldPath = path.join(__dirname, ws.logoUrl);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    const updated = await Workspace.findByIdAndUpdate(wsId, { logoUrl }, { new: true });
+    if (!updated) return res.status(404).json({ success: false, message: "Workspace introuvable" });
+
+    const wsObj = updated.toObject();
+    wsObj.company = wsObj.name;
+    wsObj.id      = wsObj._id;
+    res.json({ success: true, data: wsObj, logoUrl });
+  } catch (e) { next(e); }
+});
+
+// DELETE /api/workspaces/:wsId/logo
+app.delete("/api/workspaces/:wsId/logo", authenticateToken, async (req, res, next) => {
+  try {
+    const ws = await Workspace.findById(req.params.wsId);
+    if (!ws) return res.status(404).json({ success: false, message: "Workspace introuvable" });
+    if (ws.logoUrl) {
+      const filePath = path.join(__dirname, ws.logoUrl);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    const updated = await Workspace.findByIdAndUpdate(req.params.wsId, { logoUrl: "" }, { new: true });
+    const wsObj = updated.toObject();
+    wsObj.company = wsObj.name;
+    wsObj.id      = wsObj._id;
+    res.json({ success: true, data: wsObj });
   } catch (e) { next(e); }
 });
 

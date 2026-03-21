@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo  } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { createPortal } from "react-dom";
+import logo from '../assets/logoM2S.png'
+
 
 import * as XLSX from "xlsx";
 import {
@@ -124,7 +126,7 @@ const generateAttendancePDF = (doc, allCandidates) => {
 };
 
 const API_BASE = (typeof import_meta_env !== "undefined" && import_meta_env?.VITE_API_URL)
-  || "https://sparkling-empathy-production-05b3.up.railway.app/api";
+  || "http://localhost:5000/api";
 
 function norm(o) {
   if (!o) return o;
@@ -291,13 +293,13 @@ const ZOOMS = [
   { label: "Trimestre", days: 90, cw: 13, halfDay: false },
 ];
 const GCOLS = [
-  { key: "group",  label: "Thème",      w: 260 },
-  { key: "groupe", label: "Grp",        w: 48  },
-  { key: "count",  label: "Cand.",      w: 48  },
-  { key: "wdays",  label: "Jours",      w: 48  },
-  { key: "start",  label: "Début",      w: 138 },
-  { key: "prog",   label: "Avancement", w: 90  },
-  { key: "end",    label: "Fin",        w: 138 }
+  { key: "group",  label: "Thème",      w: 240 },
+  { key: "groupe", label: "Grp",        w: 55  },
+  { key: "count",  label: "Cand.",      w: 55  },
+  { key: "wdays",  label: "Jours",      w: 55  },
+  { key: "start",  label: "Début",      w: 125 },
+  { key: "prog",   label: "Avancement", w: 100  },
+  { key: "end",    label: "Fin",        w: 125 }
 ];
 const CHDR = { group: "flex-start", groupe: "center", wdays: "center", start: "center", prog: "flex-start", end: "center" };
 const GTOT = GCOLS.reduce((s, c) => s + c.w, 0);
@@ -800,9 +802,29 @@ function Sidebar({ workspaces, activeWs, onSelectWs, section, onSection, onCreat
     <aside style={{ position: "fixed", left: 0, top: 0, bottom: 0, zIndex: 30, width: open ? 240 : 0, background: T.sidebarBg, borderRight: `1px solid ${T.sidebarBdr}`, overflow: "hidden", transition: "width 0.2s ease", flexShrink: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ width: 240, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div ref={dropRef} style={{ padding: "10px 8px 6px", position: "relative" }}>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px 10px" }}>
+  <img
+    src={logo}
+    alt="Logo"
+    style={{ width: 28, height: 28, borderRadius: 7, objectFit: "contain" }}
+  />
+  <span style={{
+    fontSize: 15, fontWeight: 700, color: T.sidebarText,
+    letterSpacing: "-0.02em"
+  }}>M2S Consulting</span>
+</div>
+
+<div style={{ height: 1, background: T.sidebarBdr, margin: "0 8px 6px" }} />
+
           {si(false, () => setWsOpen(v => !v), <>
-            <div style={{ width: 20, height: 20, borderRadius: 4, flexShrink: 0, background: "rgba(55,53,47,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}><Building2 style={{ width: 12, height: 12, color: T.sidebarText }} /></div>
-            <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: T.sidebarText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: "-0.01em" }}>{ws ? ws.company : "Workspace"}</span>
+<div style={{ width:20, height:20, borderRadius:4, flexShrink:0, background:"rgba(55,53,47,0.08)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+  {ws?.logoUrl
+    ? <img src={`${API_BASE.replace("/api","")}${ws.logoUrl}`} alt="" style={{ width:"100%", height:"100%", objectFit:"contain" }}/>
+    : <Building2 style={{ width:12, height:12, color:T.sidebarText }}/>
+  }
+</div>            
+<span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: T.sidebarText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: "-0.01em" }}>{ws ? ws.company : "Workspace"}</span>
             <ChevronDown style={{ width: 12, height: 12, color: T.sidebarSub, flexShrink: 0, transform: wsOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
           </>)}
           {wsOpen && (
@@ -909,42 +931,145 @@ function Sidebar({ workspaces, activeWs, onSelectWs, section, onSection, onCreat
 }
 
 function WsModal({ onClose, onCreate }) {
-  const [company, setCompany] = useState("");
+  const [company,   setCompany]   = useState("");
   const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [endDate,   setEndDate]   = useState("");
+  const [saving,    setSaving]    = useState(false);
+  const [logoFile,  setLogoFile]  = useState(null);      // ← File object
+  const [logoPreview, setLogoPreview] = useState(null);  // ← base64 preview
+  const fileInputRef = useRef(null);
+
   const canCreate = company.trim() && startDate && endDate && startDate <= endDate;
-  const create = async () => {
-    if (!canCreate || saving) return; setSaving(true); await onCreate({ company: company.trim(), name: company.trim(), startDate, endDate });
-    setSaving(false); onClose();
+
+  const handleLogoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert("Logo trop lourd (max 2 Mo)"); return; }
+    setLogoFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setLogoPreview(ev.target.result);
+    reader.readAsDataURL(file);
   };
-  const iS = { width: "100%", boxSizing: "border-box", padding: "7px 10px", borderRadius: 4, border: `1px solid rgba(55,53,47,0.2)`, fontSize: 13, color: T.pageText, outline: "none", fontFamily: "inherit", background: "#fff", transition: "box-shadow 0.12s,border-color 0.12s" };
-  const fI = e => { e.target.style.borderColor = T.accent; e.target.style.boxShadow = `0 0 0 2px ${T.accent}22`; };
-  const fO = e => { e.target.style.borderColor = "rgba(55,53,47,0.2)"; e.target.style.boxShadow = "none"; };
+
+  const removeLogo = () => {
+    setLogoFile(null);
+    setLogoPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const create = async () => {
+    if (!canCreate || saving) return;
+    setSaving(true);
+    try {
+      // 1. Créer le workspace
+      const ws = await onCreate({ company: company.trim(), name: company.trim(), startDate, endDate });
+
+      // 2. Upload du logo si présent (onCreate doit retourner le ws créé)
+      if (logoFile && ws?.id) {
+        const fd = new FormData();
+        fd.append("logo", logoFile);
+        await fetch(`${API_BASE}/workspaces/${ws.id}/logo`, {
+          method: "POST",
+headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` },
+          body: fd,
+        });
+      }
+      onClose();
+    } catch (e) {
+      alert("Erreur création : " + e.message);
+    }
+    setSaving(false);
+  };
+
+  const iS = { width:"100%", boxSizing:"border-box", padding:"7px 10px", borderRadius:4, border:`1px solid rgba(55,53,47,0.2)`, fontSize:13, color:T.pageText, outline:"none", fontFamily:"inherit", background:"#fff", transition:"box-shadow 0.12s,border-color 0.12s" };
+  const fI = e => { e.target.style.borderColor=T.accent; e.target.style.boxShadow=`0 0 0 2px ${T.accent}22`; };
+  const fO = e => { e.target.style.borderColor="rgba(55,53,47,0.2)"; e.target.style.boxShadow="none"; };
   const dur = startDate && endDate && startDate <= endDate ? gdb(pd(startDate), pd(endDate)) + 1 : null;
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", borderRadius: 8, boxShadow: "0 16px 48px rgba(0,0,0,0.18)", width: "min(400px,95vw)", border: `1px solid rgba(55,53,47,0.13)`, overflow: "hidden" }}>
-        <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${T.pageBdr}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 16, fontWeight: 700, color: T.pageText, letterSpacing: "-0.02em" }}>Nouveau workspace</span>
-          <button onClick={onClose} style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", color: T.pageSub }}><X style={{ width: 14, height: 14 }} /></button>
+    <div style={{ position:"fixed", inset:0, zIndex:500, background:"rgba(0,0,0,0.35)", display:"flex", alignItems:"center", justifyContent:"center" }}
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background:"#fff", borderRadius:8, boxShadow:"0 16px 48px rgba(0,0,0,0.18)", width:"min(420px,95vw)", border:`1px solid rgba(55,53,47,0.13)`, overflow:"hidden" }}>
+
+        {/* Header */}
+        <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${T.pageBdr}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <span style={{ fontSize:16, fontWeight:700, color:T.pageText, letterSpacing:"-0.02em" }}>Nouveau workspace</span>
+          <button onClick={onClose} style={{ width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:4, border:"none", background:"transparent", cursor:"pointer", color:T.pageSub }}>
+            <X style={{ width:14, height:14 }}/>
+          </button>
         </div>
-        <div style={{ padding: "18px 24px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+
+        <div style={{ padding:"18px 24px 20px", display:"flex", flexDirection:"column", gap:14 }}>
+
+          {/* ── Logo upload ── */}
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 5 }}>Entreprise / Client</div>
-            <input autoFocus value={company} onChange={e => setCompany(e.target.value)} onKeyDown={e => e.key === "Enter" && create()} placeholder="Ex: TechCorp Maroc" style={iS} onFocus={fI} onBlur={fO} />
-          </div>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Période</div>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Début</div><input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); if (endDate && e.target.value > endDate) setEndDate(""); }} style={iS} onFocus={fI} onBlur={fO} /></div>
-              <div style={{ paddingBottom: 9, color: T.pageTer, fontSize: 13 }}>→</div>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Fin</div><input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(e.target.value)} style={iS} onFocus={fI} onBlur={fO} /></div>
+            <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:8 }}>
+              Logo de l'entreprise
             </div>
-            {dur && <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8, padding: "5px 10px", borderRadius: 4, background: "rgba(55,53,47,0.04)", border: `1px solid ${T.pageBdr}`, width: "fit-content" }}><CalendarRange style={{ width: 12, height: 12, color: T.pageSub }} /><span style={{ fontSize: 12, color: T.pageSub, fontWeight: 500 }}>{dur} jour{dur > 1 ? "s" : ""}</span></div>}
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              {/* Zone logo */}
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                style={{ width:56, height:56, borderRadius:8, border:`1.5px dashed ${logoPreview?"transparent":"rgba(55,53,47,0.25)"}`, background: logoPreview?"transparent":"rgba(55,53,47,0.03)", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0, overflow:"hidden", position:"relative", transition:"border-color 0.12s" }}
+                onMouseEnter={e => { if (!logoPreview) e.currentTarget.style.borderColor=T.accent; }}
+                onMouseLeave={e => { if (!logoPreview) e.currentTarget.style.borderColor="rgba(55,53,47,0.25)"; }}
+              >
+                {logoPreview ? (
+                  <img src={logoPreview} alt="logo" style={{ width:"100%", height:"100%", objectFit:"contain" }}/>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(55,53,47,0.3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                  </svg>
+                )}
+              </div>
+
+              <div style={{ flex:1 }}>
+                <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" onChange={handleLogoChange} style={{ display:"none" }}/>
+                <div style={{ display:"flex", gap:6 }}>
+                  <button onClick={() => fileInputRef.current?.click()} style={{ flex:1, padding:"6px 0", fontSize:12, color:T.pageSub, background:"transparent", border:`1px solid rgba(55,53,47,0.2)`, borderRadius:4, cursor:"pointer", fontFamily:"inherit" }}>
+                    {logoPreview ? "Changer" : "Choisir un fichier"}
+                  </button>
+                  {logoPreview && (
+                    <button onClick={removeLogo} style={{ width:30, height:30, display:"flex", alignItems:"center", justifyContent:"center", border:`1px solid rgba(212,76,71,0.25)`, borderRadius:4, background:"transparent", cursor:"pointer", color:"#d44c47" }}>
+                      <X style={{ width:12, height:12 }}/>
+                    </button>
+                  )}
+                </div>
+                <div style={{ fontSize:10, color:T.pageTer, marginTop:4 }}>PNG, JPG, SVG — max 2 Mo</div>
+              </div>
+            </div>
           </div>
-          <button onClick={create} disabled={!canCreate || saving} style={{ width: "100%", padding: "9px", fontSize: 14, fontWeight: 600, color: "#fff", background: canCreate && !saving ? "#37352f" : "#ccc", border: "none", borderRadius: 4, cursor: canCreate && !saving ? "pointer" : "not-allowed", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {saving && <Spinner size={14} color="#fff" />}Créer le workspace
+
+          {/* Entreprise */}
+          <div>
+            <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:5 }}>Entreprise / Client</div>
+            <input autoFocus value={company} onChange={e=>setCompany(e.target.value)} onKeyDown={e=>e.key==="Enter"&&create()} placeholder="Ex: TechCorp Maroc" style={iS} onFocus={fI} onBlur={fO}/>
+          </div>
+
+          {/* Période */}
+          <div>
+            <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:8 }}>Période</div>
+            <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:11, color:T.pageTer, marginBottom:4 }}>Début</div>
+                <input type="date" value={startDate} onChange={e=>{ setStartDate(e.target.value); if(endDate&&e.target.value>endDate)setEndDate(""); }} style={iS} onFocus={fI} onBlur={fO}/>
+              </div>
+              <div style={{ paddingBottom:9, color:T.pageTer, fontSize:13 }}>→</div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:11, color:T.pageTer, marginBottom:4 }}>Fin</div>
+                <input type="date" value={endDate} min={startDate||undefined} onChange={e=>setEndDate(e.target.value)} style={iS} onFocus={fI} onBlur={fO}/>
+              </div>
+            </div>
+            {dur && (
+              <div style={{ display:"flex", alignItems:"center", gap:5, marginTop:8, padding:"5px 10px", borderRadius:4, background:"rgba(55,53,47,0.04)", border:`1px solid ${T.pageBdr}`, width:"fit-content" }}>
+                <CalendarRange style={{ width:12, height:12, color:T.pageSub }}/>
+                <span style={{ fontSize:12, color:T.pageSub, fontWeight:500 }}>{dur} jour{dur>1?"s":""}</span>
+              </div>
+            )}
+          </div>
+
+          <button onClick={create} disabled={!canCreate||saving} style={{ width:"100%", padding:"9px", fontSize:14, fontWeight:600, color:"#fff", background:canCreate&&!saving?"#37352f":"#ccc", border:"none", borderRadius:4, cursor:canCreate&&!saving?"pointer":"not-allowed", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+            {saving&&<Spinner size={14} color="#fff"/>}Créer le workspace
           </button>
         </div>
       </div>
@@ -967,6 +1092,31 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
   const [selectedCols, setSelectedCols]   = useState([]);      // colonnes cochées, dans l'ordre voulu
   const [dragIdx, setDragIdx]             = useState(null);
   const [exporting, setExporting]         = useState(false);
+
+  const logoInputRef = useRef(null);
+
+const handleLogoUpload = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append("logo", file);
+  const res = await fetch(`${API_BASE}/workspaces/${ws.id}/logo`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` },
+    body: fd,
+  });
+  const data = await res.json();
+  if (data.success) onUpdateWs(data.data);
+};
+
+const handleLogoDelete = async () => {
+  const res = await fetch(`${API_BASE}/workspaces/${ws.id}/logo`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` },
+  });
+  const data = await res.json();
+  if (data.success) onUpdateWs(data.data);
+};
 
   // Colonnes "connues" avec label lisible
   const KNOWN_LABELS = {
@@ -1272,7 +1422,7 @@ const COL_GROUPS_EXPORT = [
   const extraCols  = allCols.filter(c => !knownKeys.has(c.key));
 
   return (
-    <div style={{ padding: "80px 96px 80px", maxWidth: 900 }}>
+    <div style={{ padding: "40px 96px 80px", maxWidth: 900 }}>
 
       {/* ── Modal suppression ── */}
       {confirmDelete && (
@@ -1628,322 +1778,338 @@ if (k === "mois_planif") {
       {/* ══════════════════════════════════════════════════════════
           CONTENU OVERVIEW
       ══════════════════════════════════════════════════════════ */}
-      <div style={{ marginBottom: 8 }}>
-        {editing ? (
-          <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, background: "rgba(55,53,47,0.015)", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em" }}>Modifier le workspace</div>
-            <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <div style={{ flex: "2 1 200px" }}>
-                <div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Entreprise / Client</div>
-                <input autoFocus value={editForm.company} onChange={e => setEditForm(p => ({ ...p, company: e.target.value }))}
-                  onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
-                  style={{ ...iS, width: "100%", fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em", padding: "8px 12px", borderColor: T.accent, boxShadow: `0 0 0 2px ${T.accent}22` }} />
-              </div>
-              <div style={{ flex: "1 1 140px" }}>
-                <div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Date de début</div>
-                <input type="date" value={editForm.startDate}
-                  onChange={e => { setEditForm(p => ({ ...p, startDate: e.target.value })); if (editForm.endDate && e.target.value > editForm.endDate) setEditForm(p => ({ ...p, endDate: "" })); }}
-                  style={{ ...iS, width: "100%" }} onFocus={fI} onBlur={fO} />
-              </div>
-              <div style={{ flex: "1 1 140px" }}>
-                <div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Date de fin</div>
-                <input type="date" value={editForm.endDate} min={editForm.startDate || undefined}
-                  onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
-                  style={{ ...iS, width: "100%" }} onFocus={fI} onBlur={fO} />
-              </div>
-            </div>
-            {dur && (
-              <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 4, background: "rgba(55,53,47,0.04)", border: `1px solid ${T.pageBdr}`, width: "fit-content" }}>
-                <CalendarRange style={{ width: 12, height: 12, color: T.pageSub }} />
-                <span style={{ fontSize: 12, color: T.pageSub, fontWeight: 500 }}>{dur} jour{dur > 1 ? "s" : ""}</span>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button onClick={saveEdit} disabled={saving || !editForm.company.trim()}
-                style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", fontSize: 13, fontWeight: 600, color: "#fff", background: saving || !editForm.company.trim() ? "#ccc" : "#37352f", border: "none", borderRadius: 4, cursor: saving || !editForm.company.trim() ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                {saving ? <Spinner size={13} color="#fff" /> : <Check style={{ width: 13, height: 13 }} />}{saving ? "Enregistrement…" : "Enregistrer"}
-              </button>
-              <button onClick={() => setEditing(false)}
-                style={{ padding: "7px 14px", fontSize: 13, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                Annuler
-              </button>
-            </div>
+      {/* ══════════════════════════════════════════════════════════
+      CONTENU OVERVIEW — Header + Dashboard redesignés
+  ══════════════════════════════════════════════════════════ */}
+
+  {/* ── Date range ── */}
+  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: T.pageSub, marginBottom: 16 }}>
+    <CalendarRange style={{ width: 12, height: 12 }} />
+    {fmtRange(ws)}
+  </div>
+
+  {/* ── Header : logo + titre + actions ── */}
+  {editing ? (
+    /* Mode édition — inchangé */
+    <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, background: "rgba(55,53,47,0.015)", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14, marginBottom: 32 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em" }}>Modifier le workspace</div>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ flex: "2 1 200px" }}>
+          <div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Entreprise / Client</div>
+          <input autoFocus value={editForm.company} onChange={e => setEditForm(p => ({ ...p, company: e.target.value }))}
+            onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
+            style={{ ...iS, width: "100%", fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em", padding: "8px 12px", borderColor: T.accent, boxShadow: `0 0 0 2px ${T.accent}22` }} />
+        </div>
+        <div style={{ flex: "1 1 140px" }}>
+          <div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Date de début</div>
+          <input type="date" value={editForm.startDate}
+            onChange={e => { setEditForm(p => ({ ...p, startDate: e.target.value })); if (editForm.endDate && e.target.value > editForm.endDate) setEditForm(p => ({ ...p, endDate: "" })); }}
+            style={{ ...iS, width: "100%" }} onFocus={fI} onBlur={fO} />
+        </div>
+        <div style={{ flex: "1 1 140px" }}>
+          <div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Date de fin</div>
+          <input type="date" value={editForm.endDate} min={editForm.startDate || undefined}
+            onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
+            style={{ ...iS, width: "100%" }} onFocus={fI} onBlur={fO} />
+        </div>
+      </div>
+      {dur && (
+        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 4, background: "rgba(55,53,47,0.04)", border: `1px solid ${T.pageBdr}`, width: "fit-content" }}>
+          <CalendarRange style={{ width: 12, height: 12, color: T.pageSub }} />
+          <span style={{ fontSize: 12, color: T.pageSub, fontWeight: 500 }}>{dur} jour{dur > 1 ? "s" : ""}</span>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={saveEdit} disabled={saving || !editForm.company.trim()}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", fontSize: 13, fontWeight: 600, color: "#fff", background: saving || !editForm.company.trim() ? "#e9e9e7" : "#37352f", border: "none", borderRadius: 6, cursor: saving || !editForm.company.trim() ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+          {saving ? <Spinner size={13} color="#fff" /> : <Check style={{ width: 13, height: 13 }} />}
+          {saving ? "Enregistrement…" : "Enregistrer"}
+        </button>
+        <button onClick={() => setEditing(false)}
+          style={{ padding: "7px 14px", fontSize: 13, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>
+          Annuler
+        </button>
+      </div>
+    </div>
+  ) : (
+    <div style={{ marginBottom: 28 }}>
+
+      {/* Ligne 1 : logo + titre (le titre peut être long, il wrap) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
+        {/* Logo — plus grand et visible */}
+        <div style={{ width: 72, height: 72, borderRadius: 10, border: `1px solid ${T.pageBdr}`, background: "#fafaf9", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+          {ws.logoUrl
+            ? <img src={`${API_BASE.replace("/api", "")}${ws.logoUrl}`} alt={ws.company} style={{ width: "100%", height: "100%", objectFit: "contain", padding: 6, boxSizing: "border-box" }} />
+            : <Building2 style={{ width: 28, height: 28, color: T.pageTer, strokeWidth: 1.4 }} />
+          }
+        </div>
+        {/* Titre + date — flex: 1 pour prendre tout l'espace restant */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 800, color: T.pageText, letterSpacing: "-0.03em", lineHeight: 1.15, margin: "0 0 4px", wordBreak: "break-word" }}>
+            {ws.company}
+          </h1>
+          <div style={{ fontSize: 12, color: T.pageTer }}>
+            Créé le {new Date(ws.createdAt || Date.now()).toLocaleDateString("fr-FR")}
           </div>
-        ) : (
-          <>
-            <div style={{ fontSize: 13, color: T.pageSub, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
-              <CalendarRange style={{ width: 12, height: 12 }} />{fmtRange(ws)}
-            </div>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
-              <div>
-                <h1 style={{ fontSize: 40, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em", lineHeight: 1.1, margin: 0 }}>{ws.company}</h1>
-                <div style={{ fontSize: 13, color: T.pageTer, marginTop: 8 }}>Créé le {new Date(ws.createdAt || Date.now()).toLocaleDateString("fr-FR")}</div>
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 8, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                {/* ── BOUTON EXPORT ── */}
-                {ws.hasExportBase && (
-  <button onClick={openExport}
-    style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "#448361", background: "rgba(68,131,97,0.06)", border: `1px solid rgba(68,131,97,0.3)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-    <FileUp style={{ width: 13, height: 13 }} /> Exporter Excel
-  </button>
-)}
-                <button onClick={startEdit}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                  <Edit2 style={{ width: 13, height: 13 }} /> Modifier
-                </button>
-                <button onClick={() => setConfirmDelete(true)}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "#d44c47", background: "transparent", border: `1px solid rgba(212,76,71,0.3)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                  <Trash2 style={{ width: 13, height: 13 }} /> Supprimer
-                </button>
-              </div>
-            </div>
-          </>
-        )}
+        </div>
       </div>
 
-      {divider}
+      {/* Ligne 2 : boutons d'action — alignés sous le titre (avec indent = largeur logo + gap) */}
+      <div style={{ paddingLeft: 86, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <input ref={logoInputRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" onChange={handleLogoUpload} style={{ display: "none" }} />
 
-      {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, border: `1px solid ${T.pageBdr}`, borderRadius: 4, overflow: "hidden" }}>
-        {[
-          { Icon: CalendarRange, label: "Tâches planifiées", value: tasks.length, sub: `${done} terminée${done!==1?"s":""}`, key: "gantt" },
-          { Icon: Users, label: "Candidats", value: uniqueCandidatsCount, sub: `${retained} retenu${retained!==1?"s":""}`, key: "candidats" },
-          { Icon: FolderOpen, label: "Documents", value: documents.length, sub: `${validated} validé${validated!==1?"s":""}`, key: "documents" },
-        ].map((s, i) => {
-          const Icon = s.Icon;
-          return (
-            <button key={s.key} onClick={() => onSection(s.key)}
-              style={{ padding: "24px", border: "none", background: "#fff", cursor: "pointer", textAlign: "left", borderRight: i < 2 ? `1px solid ${T.pageBdr}` : "none", transition: "background 0.08s" }}
-              onMouseEnter={e => e.currentTarget.style.background = T.pageHov}
-              onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
-              <div style={{ marginBottom: 12 }}><Icon style={{ width: 20, height: 20, color: T.pageSub, strokeWidth: 1.6 }} /></div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em", lineHeight: 1 }}>{s.value}</div>
-              <div style={{ fontSize: 13, color: T.pageText, fontWeight: 500, marginTop: 4 }}>{s.label}</div>
-              <div style={{ fontSize: 12, color: T.pageSub, marginTop: 2 }}>{s.sub}</div>
+        {/* Groupe logo (Changer / Retirer) */}
+        <div style={{ display: "flex", border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
+          <button
+            onClick={() => logoInputRef.current?.click()}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", fontSize: 12, fontWeight: 500, color: T.pageSub, background: "#fff", border: "none", borderRight: ws.logoUrl ? `1px solid ${T.pageBdr}` : "none", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            {ws.logoUrl ? "Changer logo" : "Ajouter logo"}
+          </button>
+          {ws.logoUrl && (
+            <button onClick={handleLogoDelete} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 12, fontWeight: 500, color: "#d44c47", background: "#fff", border: "none", cursor: "pointer", fontFamily: "inherit" }}>
+              <Trash2 style={{ width: 11, height: 11 }} /> Retirer
             </button>
-          );
-        })}
-      </div>
-
-      {/* ══════════════════════════════════════════
-    DASHBOARD — métriques enrichies
-══════════════════════════════════════════ */}
-{divider}
-
-{/* ── KPI secondaires ── */}
-{(() => {
-  const totalJours = tasks.reduce((s, t) => {
-    if (!t.start || !t.end) return s;
-    return s + calcWD(t.start, t.end, [6, 0], true, []);
-  }, 0);
-
-  const totalCout = candidats.reduce((s, c) => {
-    const v = parseFloat(String(c.cout || "0").replace(/\s/g, "").replace(",", ".")) || 0;
-    return s + v;
-  }, 0);
-
-  const uniqueThemes = [...new Set(tasks.map(t => t.group).filter(Boolean))];
-  const uniqueGroupes = tasks.length;
-
-  const now = new Date(); now.setHours(0, 0, 0, 0);
-  const startOfNextWeek = new Date(now);
-  startOfNextWeek.setDate(now.getDate() + (7 - now.getDay() + 1) % 7 || 7);
-  const endOfNextWeek = new Date(startOfNextWeek);
-  endOfNextWeek.setDate(startOfNextWeek.getDate() + 6);
-
-  const inProgress = tasks.filter(t => {
-    if (!t.start || !t.end) return false;
-    return pd(t.start) <= now && pd(t.end) >= now;
-  });
-  const upcoming = tasks.filter(t => {
-    if (!t.start) return false;
-    const s = pd(t.start);
-    return s > now && s <= endOfNextWeek;
-  });
-
-  const done = tasks.filter(t => t.end && pd(t.end) < now).length;
-  const pct = tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
-
-  const avgPerCand = uniqueCandidatsCount > 0
-    ? Math.round(totalCout / uniqueCandidatsCount)
-    : 0;
-  const avgPerDay = totalJours > 0
-    ? Math.round(totalCout / totalJours)
-    : 0;
-
-  const cardS = {
-    background: "rgba(55,53,47,0.03)", borderRadius: 8,
-    padding: "14px 16px", display: "flex", flexDirection: "column", gap: 4,
-  };
-  const bigNum = { fontSize: 24, fontWeight: 700, color: T.pageText, lineHeight: 1.1 };
-  const lbl = { fontSize: 12, color: T.pageSub };
-  const sub = { fontSize: 11, color: T.pageTer };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-      {/* Ligne 1 : 4 KPI */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10 }}>
-        {[
-          { label: "Thèmes",        value: uniqueThemes.length,  sub: "formations distinctes" },
-          { label: "Groupes",       value: uniqueGroupes,        sub: "groupes planifiés" },
-          { label: "Bénéficiaires", value: uniqueCandidatsCount, sub: "candidats inscrits" },
-          { label: "Jours formation", value: totalJours,         sub: "jours ouvrés cumulés" },
-        ].map(k => (
-          <div key={k.label} style={cardS}>
-            <div style={lbl}>{k.label}</div>
-            <div style={bigNum}>{k.value.toLocaleString("fr-FR")}</div>
-            <div style={sub}>{k.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Avancement global */}
-      <div style={{ background: "#fff", border: `1px solid ${T.pageBdr}`, borderRadius: 12, padding: "14px 18px" }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-          Avancement global
+          )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ fontSize: 36, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em", lineHeight: 1 }}>{pct}%</div>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.pageSub, marginBottom: 5 }}>
-              <span>{done} groupe{done !== 1 ? "s" : ""} terminé{done !== 1 ? "s" : ""}</span>
-              <span>{inProgress.length} en cours · {upcoming.length} à venir</span>
-            </div>
-            <div style={{ height: 5, borderRadius: 99, background: "rgba(55,53,47,0.1)", overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${pct}%`, background: "#448361", borderRadius: 99 }} />
-            </div>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+
+        {/* Séparateur */}
+        <div style={{ width: 1, height: 18, background: T.pageBdr, flexShrink: 0 }} />
+
+        {/* Modifier */}
+        <button
+          onClick={startEdit}
+          style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", fontSize: 12, fontWeight: 500, color: T.pageSub, background: "#fff", border: `1px solid ${T.pageBdr}`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
+          onMouseEnter={e => e.currentTarget.style.background = "#f7f7f5"}
+          onMouseLeave={e => e.currentTarget.style.background = "#fff"}
+        >
+          <Edit2 style={{ width: 11, height: 11 }} /> Modifier
+        </button>
+
+        {/* Exporter Excel */}
+        {ws.hasExportBase && (
+          <button
+            onClick={openExport}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", fontSize: 12, fontWeight: 500, color: "#3b6d11", background: "#eaf3de", border: "1px solid #c0dd97", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
+            onMouseEnter={e => e.currentTarget.style.background = "#daecc8"}
+            onMouseLeave={e => e.currentTarget.style.background = "#eaf3de"}
+          >
+            <FileUp style={{ width: 11, height: 11 }} /> Exporter Excel
+          </button>
+        )}
+
+        {/* Supprimer */}
+        <button
+          onClick={() => setConfirmDelete(true)}
+          style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", fontSize: 12, fontWeight: 500, color: "#d44c47", background: "#fff2f2", border: "1px solid #ffd5d4", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
+          onMouseEnter={e => e.currentTarget.style.background = "#ffe4e3"}
+          onMouseLeave={e => e.currentTarget.style.background = "#fff2f2"}
+        >
+          <Trash2 style={{ width: 11, height: 11 }} /> Supprimer
+        </button>
+      </div>
+    </div>
+  )}
+
+  {divider}
+
+  {/* ══════════════════════════════════════════
+      DASHBOARD — métriques enrichies (inchangé logiquement)
+  ══════════════════════════════════════════ */}
+  {(() => {
+    const totalJours = tasks.reduce((s, t) => {
+      if (!t.start || !t.end) return s;
+      return s + calcWD(t.start, t.end, [6, 0], true, []);
+    }, 0);
+
+    const totalCout = candidats.reduce((s, c) => {
+      const v = parseFloat(String(c.cout || "0").replace(/\s/g, "").replace(",", ".")) || 0;
+      return s + v;
+    }, 0);
+
+    const uniqueThemes = [...new Set(tasks.map(t => t.group).filter(Boolean))];
+    const uniqueGroupes = tasks.length;
+
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const startOfNextWeek = new Date(now);
+    startOfNextWeek.setDate(now.getDate() + (7 - now.getDay() + 1) % 7 || 7);
+    const endOfNextWeek = new Date(startOfNextWeek);
+    endOfNextWeek.setDate(startOfNextWeek.getDate() + 6);
+
+    const inProgress = tasks.filter(t => {
+      if (!t.start || !t.end) return false;
+      return pd(t.start) <= now && pd(t.end) >= now;
+    });
+    const upcoming = tasks.filter(t => {
+      if (!t.start) return false;
+      const s = pd(t.start);
+      return s > now && s <= endOfNextWeek;
+    });
+
+    const done = tasks.filter(t => t.end && pd(t.end) < now).length;
+    const pct = tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
+
+    const avgPerCand = uniqueCandidatsCount > 0 ? Math.round(totalCout / uniqueCandidatsCount) : 0;
+    const avgPerDay  = totalJours > 0 ? Math.round(totalCout / totalJours) : 0;
+
+    // Styles locaux
+    const kpiCard = { background: "#fafaf9", border: `1px solid #f0f0ee`, borderRadius: 8, padding: "14px 16px" };
+    const kpiLabel = { fontSize: 11, color: T.pageSub, marginBottom: 4 };
+    const kpiValue = { fontSize: 26, fontWeight: 700, color: T.pageText, letterSpacing: "-0.03em", lineHeight: 1 };
+    const kpiSub   = { fontSize: 11, color: T.pageTer, marginTop: 3 };
+    const panelCard = { background: "#fff", border: `1px solid ${T.pageBdr}`, borderRadius: 8, padding: "16px 18px" };
+    const panelTitle = { fontSize: 10, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 };
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+
+        {/* KPI x4 — colorés */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10 }}>
           {[
-            { color: "#448361", label: `Terminés (${done})` },
-            { color: "#cb912f", label: `En cours (${inProgress.length})` },
-            { color: "rgba(55,53,47,0.18)", label: `À venir (${Math.max(0, tasks.length - done - inProgress.length)})` },
-          ].map(l => (
-            <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.pageSub }}>
-              <div style={{ width: 10, height: 10, borderRadius: 2, background: l.color, flexShrink: 0 }} />
-              {l.label}
+            {
+              label: "Thèmes", value: uniqueThemes.length, sub: "formations distinctes",
+              bg: "#e6f1fb", border: "#b5d4f4", labelColor: "#185fa5",
+              valueColor: "#0c447c", subColor: "#378add",
+              icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>,
+            },
+            {
+              label: "Groupes", value: uniqueGroupes, sub: "groupes planifiés",
+              bg: "#eeedfe", border: "#afa9ec", labelColor: "#534ab7",
+              valueColor: "#3c3489", subColor: "#7f77dd",
+              icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#534ab7" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+            },
+            {
+              label: "Bénéficiaires", value: uniqueCandidatsCount, sub: "candidats inscrits",
+              bg: "#e1f5ee", border: "#9fe1cb", labelColor: "#0f6e56",
+              valueColor: "#085041", subColor: "#1d9e75",
+              icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0f6e56" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>,
+            },
+            {
+              label: "Jours formation", value: totalJours, sub: "jours ouvrés cumulés",
+              bg: "#faeeda", border: "#fac775", labelColor: "#854f0b",
+              valueColor: "#633806", subColor: "#ba7517",
+              icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#854f0b" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+            },
+          ].map(k => (
+            <div key={k.label} style={{ background: k.bg, border: `1px solid ${k.border}`, borderRadius: 8, padding: "16px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <div style={{ width: 26, height: 26, borderRadius: 6, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {k.icon}
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: k.labelColor }}>{k.label}</div>
+              </div>
+              <div style={{ fontSize: 30, fontWeight: 800, color: k.valueColor, letterSpacing: "-0.04em", lineHeight: 1 }}>
+                {k.value.toLocaleString("fr-FR")}
+              </div>
+              <div style={{ fontSize: 11, color: k.subColor, marginTop: 4 }}>{k.sub}</div>
             </div>
           ))}
         </div>
-      </div>
 
-      {/* Ligne 2 : En cours + À venir */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10 }}>
-        {/* En cours */}
-        <div style={{ background: "#fff", border: `1px solid ${T.pageBdr}`, borderRadius: 12, padding: "14px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#cb912f" }} />
-            Thèmes en cours — cette semaine
+        {/* Avancement global */}
+        <div style={panelCard}>
+          <div style={panelTitle}>Avancement global</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ fontSize: 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em", lineHeight: 1, flexShrink: 0 }}>{pct}%</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.pageSub, marginBottom: 6 }}>
+                <span>{done} groupe{done !== 1 ? "s" : ""} terminé{done !== 1 ? "s" : ""}</span>
+                <span>{inProgress.length} en cours · {upcoming.length} à venir</span>
+              </div>
+              <div style={{ height: 4, borderRadius: 99, background: "rgba(55,53,47,0.1)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${pct}%`, background: "#448361", borderRadius: 99 }} />
+              </div>
+            </div>
           </div>
-          {inProgress.length === 0
-            ? <div style={{ fontSize: 12, color: T.pageTer, fontStyle: "italic" }}>Aucune formation en cours</div>
-            : inProgress.slice(0, 4).map((t, i) => {
-                const pal = grpTag(t.group);
-                return (
-                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: i < Math.min(inProgress.length, 4) - 1 ? `1px solid ${T.pageBdr}` : "none" }}>
-                    <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 3, background: pal.bg, color: pal.text, flexShrink: 0 }}>G{t.groupe || "—"}</span>
-                    <span style={{ fontSize: 12, color: T.pageText, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.group}</span>
-                    <span style={{ fontSize: 11, color: T.pageSub, fontFamily: "monospace", flexShrink: 0 }}>→ {fmt(t.end)}</span>
-                  </div>
-                );
-              })
-          }
-        </div>
-
-        {/* À venir */}
-        <div style={{ background: "#fff", border: `1px solid ${T.pageBdr}`, borderRadius: 12, padding: "14px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#337ea9" }} />
-            Thèmes à venir — semaine prochaine
-          </div>
-          {upcoming.length === 0
-            ? <div style={{ fontSize: 12, color: T.pageTer, fontStyle: "italic" }}>Aucune formation prévue la semaine prochaine</div>
-            : upcoming.slice(0, 4).map((t, i) => {
-                const pal = grpTag(t.group);
-                return (
-                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: i < Math.min(upcoming.length, 4) - 1 ? `1px solid ${T.pageBdr}` : "none" }}>
-                    <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 3, background: pal.bg, color: pal.text, flexShrink: 0 }}>G{t.groupe || "—"}</span>
-                    <span style={{ fontSize: 12, color: T.pageText, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.group}</span>
-                    <span style={{ fontSize: 11, color: T.pageSub, fontFamily: "monospace", flexShrink: 0 }}>dès {fmt(t.start)}</span>
-                  </div>
-                );
-              })
-          }
-        </div>
-      </div>
-
-      {/* Coût global */}
-      {totalCout > 0 && (
-        <div style={{ background: "#fff", border: `1px solid ${T.pageBdr}`, borderRadius: 12, padding: "14px 18px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-            Coût global du plan de formation
-          </div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
-            <span style={{ fontSize: 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em" }}>
-              {totalCout.toLocaleString("fr-FR")}
-            </span>
-            <span style={{ fontSize: 14, color: T.pageSub }}>MAD</span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, paddingTop: 12, borderTop: `1px solid ${T.pageBdr}` }}>
+          <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
             {[
-              { label: "Coût moyen / candidat", value: `${avgPerCand.toLocaleString("fr-FR")} MAD` },
-              { label: "Coût moyen / jour",     value: `${avgPerDay.toLocaleString("fr-FR")} MAD` },
-              { label: "Budget consommé",        value: `${pct}%`, color: "#448361" },
-            ].map(k => (
-              <div key={k.label}>
-                <div style={{ fontSize: 11, color: T.pageSub, marginBottom: 3 }}>{k.label}</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: k.color || T.pageText }}>{k.value}</div>
+              { color: "#448361", label: `Terminés (${done})` },
+              { color: "#cb912f", label: `En cours (${inProgress.length})` },
+              { color: "rgba(55,53,47,0.18)", label: `À venir (${Math.max(0, tasks.length - done - inProgress.length)})` },
+            ].map(l => (
+              <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.pageSub }}>
+                <div style={{ width: 8, height: 8, borderRadius: 2, background: l.color, flexShrink: 0 }} />
+                {l.label}
               </div>
             ))}
           </div>
         </div>
-      )}
-    </div>
-  );
-})()}
 
-      {divider}
-
-      {/* Tâches récentes */}
-      {tasks.length > 0 && (
-        <>
-          <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Tâches récentes</div>
-          <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 4, overflow: "hidden", marginBottom: 32 }}>
-            {tasks.slice(0, 5).map((t, i) => (
-              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 14px", borderBottom: i < Math.min(tasks.length,5)-1 ? `1px solid ${T.pageBdr}` : "none", background: i%2===0?"#fff":"rgba(55,53,47,0.015)" }}>
-                <span style={{ fontSize: 11, color: T.pageTer, fontFamily: "monospace", width: 20, textAlign: "right", flexShrink: 0 }}>{i+1}</span>
-                <span style={{ flex: 1, fontSize: 13, color: T.pageText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
-                <Tag label={t.group} scheme={grpTag(t.group)} />
-                <span style={{ fontSize: 11, color: T.pageSub, fontFamily: "monospace", flexShrink: 0 }}>{fmt(t.end)}</span>
-              </div>
-            ))}
+        {/* En cours + À venir */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10 }}>
+          {/* En cours */}
+          <div style={panelCard}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, ...panelTitle }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#cb912f", flexShrink: 0 }} />
+              Thèmes en cours — cette semaine
+            </div>
+            {inProgress.length === 0
+              ? <div style={{ fontSize: 12, color: T.pageTer, fontStyle: "italic" }}>Aucune formation en cours</div>
+              : inProgress.slice(0, 4).map((t, i) => {
+                  const pal = grpTag(t.group);
+                  return (
+                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: i < Math.min(inProgress.length, 4) - 1 ? `1px solid ${T.pageBdr}` : "none" }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 3, background: pal.bg, color: pal.text, flexShrink: 0 }}>G{t.groupe || "—"}</span>
+                      <span style={{ fontSize: 12, color: T.pageText, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.group}</span>
+                      <span style={{ fontSize: 11, color: T.pageSub, fontFamily: "monospace", flexShrink: 0 }}>→ {fmt(t.end)}</span>
+                    </div>
+                  );
+                })
+            }
           </div>
-        </>
-      )}
 
-      {/* Candidats récents */}
-      {candidats.length > 0 && (
-        <>
-          <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Candidats récents</div>
-          <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 4, overflow: "hidden" }}>
-            {candidats.slice(0, 4).map((c, i) => {
-              const st = C_STATUS.find(s => s.key === c.statut) || C_STATUS[0];
-              return (
-                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 14px", borderBottom: i < Math.min(candidats.length,4)-1 ? `1px solid ${T.pageBdr}` : "none", background: i%2===0?"#fff":"rgba(55,53,47,0.015)" }}>
-                  <div style={{ width: 26, height: 26, borderRadius: 4, background: "rgba(55,53,47,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: T.pageSub, flexShrink: 0 }}>
-                    {c.nom.charAt(0)}{c.prenom?.charAt(0)||""}
-                  </div>
-                  <span style={{ flex: 1, fontSize: 13, color: T.pageText, fontWeight: 500 }}>{c.nom} {c.prenom}</span>
-                  <span style={{ fontSize: 12, color: T.pageSub }}>{c.poste}</span>
-                  <Tag label={c.statut} scheme={{ text: st.text, bg: st.bg, bd: st.bd }} />
+          {/* À venir */}
+          <div style={panelCard}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, ...panelTitle }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#337ea9", flexShrink: 0 }} />
+              Thèmes à venir — semaine prochaine
+            </div>
+            {upcoming.length === 0
+              ? <div style={{ fontSize: 12, color: T.pageTer, fontStyle: "italic" }}>Aucune formation prévue la semaine prochaine</div>
+              : upcoming.slice(0, 4).map((t, i) => {
+                  const pal = grpTag(t.group);
+                  return (
+                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: i < Math.min(upcoming.length, 4) - 1 ? `1px solid ${T.pageBdr}` : "none" }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 3, background: pal.bg, color: pal.text, flexShrink: 0 }}>G{t.groupe || "—"}</span>
+                      <span style={{ fontSize: 12, color: T.pageText, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.group}</span>
+                      <span style={{ fontSize: 11, color: T.pageSub, fontFamily: "monospace", flexShrink: 0 }}>dès {fmt(t.start)}</span>
+                    </div>
+                  );
+                })
+            }
+          </div>
+        </div>
+
+        {/* Coût global */}
+        {totalCout > 0 && (
+          <div style={panelCard}>
+            <div style={panelTitle}>Coût global du plan de formation</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
+              <span style={{ fontSize: 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em" }}>
+                {totalCout.toLocaleString("fr-FR")}
+              </span>
+              <span style={{ fontSize: 14, color: T.pageSub }}>MAD</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, paddingTop: 12, borderTop: `1px solid ${T.pageBdr}` }}>
+              {[
+                { label: "Coût moyen / candidat", value: `${avgPerCand.toLocaleString("fr-FR")} MAD` },
+                { label: "Coût moyen / jour",     value: `${avgPerDay.toLocaleString("fr-FR")} MAD` },
+                { label: "Budget consommé",        value: `${pct}%`, color: "#448361" },
+              ].map(k => (
+                <div key={k.label}>
+                  <div style={{ fontSize: 11, color: T.pageSub, marginBottom: 3 }}>{k.label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: k.color || T.pageText }}>{k.value}</div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
-        </>
-      )}
+        )}
+      </div>
+    );
+  })()}
+
+      
     </div>
   );
 }
@@ -2749,19 +2915,219 @@ function RichDatePicker({ value, onChange, min, wd, sh, vacs, groupRows, current
   );
 }
 
+function TaskDrawer({ task, candidats, metaCache, candidatCountByKey, conflictTypesMap, onClose, onEdit, onPrint  }) {
+  if (!task) return null;
+
+  const cfKey   = `${(task.group||"").trim()}||${String(task.groupe||"")}`;
+  const meta    = metaCache[task.id] || { wdays: 0, prog: { pct: 0 } };
+  const cf      = conflictTypesMap?.[cfKey];
+  const hasConf = cf && cf.size > 0;
+  const pal     = grpTag(task.group);
+
+  const groupCandidats = candidats.filter(c =>
+    (c.theme||"").trim() === (task.group||"").trim() &&
+    String(c.groupe||"1") === String(task.groupe||"1")
+  );
+
+  const C_STATUS_MAP = {
+    "Retenu":    { bg:"#edf3ec", text:"#448361", bd:"rgba(68,131,97,0.3)" },
+    "En attente":{ bg:"#faf3dd", text:"#cb912f", bd:"rgba(203,145,47,0.3)" },
+    "Refusé":    { bg:"#fbe8e8", text:"#d44c47", bd:"rgba(212,76,71,0.3)" },
+  };
+
+  return (
+    <>
+      {/* Overlay */}
+      <div
+        onClick={onClose}
+        style={{ position:"fixed",inset:0,zIndex:400,background:"rgba(0,0,0,0.18)" }}
+      />
+
+      {/* Drawer */}
+      <div style={{
+  position:"fixed", top:0, right:0, bottom:0, zIndex:401,
+  width: 420, background:"#fff",
+  borderLeft:`1px solid rgba(55,53,47,0.12)`,
+  boxShadow:"-8px 0 32px rgba(0,0,0,0.08)",
+  display:"flex", flexDirection:"column",
+  overflow:"hidden",  // ← remplacez par hidden
+}}>
+
+        {/* ── Header ── */}
+        <div style={{ padding:"20px 22px 16px", borderBottom:`1px solid rgba(55,53,47,0.1)`, flexShrink:0 }}>
+          <div style={{ display:"flex", alignItems:"flex-start", gap:10, marginBottom:12 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:17, fontWeight:700, color:"#2c2c2a", letterSpacing:"-0.02em", lineHeight:1.3 }}>
+                {task.group}
+              </div>
+              <div style={{ fontSize:12, color:"#73726c", marginTop:3 }}>
+                Groupe {task.groupe || "1"}
+              </div>
+            </div>
+            <button onClick={onClose} style={{ width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",border:`1px solid rgba(55,53,47,0.18)`,borderRadius:5,background:"#fff",cursor:"pointer",color:"#73726c",flexShrink:0 }}>
+              <X style={{ width:13,height:13 }}/>
+            </button>
+          </div>
+
+          {/* Badges */}
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+            <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:pal.bg, color:pal.text, border:`1px solid ${pal.bd||"transparent"}`, fontWeight:500 }}>
+              {task.group}
+            </span>
+            {hasConf && (
+              <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:"rgba(212,76,71,0.08)", color:"#d44c47", border:"1px solid rgba(212,76,71,0.25)", fontWeight:500 }}>
+                ⚠ Conflit
+              </span>
+            )}
+            {task.halfDay && (
+              <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:"rgba(203,145,47,0.1)", color:"#cb912f", border:"1px solid rgba(203,145,47,0.3)", fontWeight:500 }}>
+                {task.slot === "après-midi" ? "Après-midi" : "Matin"}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* ── Infos tâche ── */}
+        <div style={{ padding:"16px 22px", borderBottom:`1px solid rgba(55,53,47,0.08)`, display:"flex", flexDirection:"column", gap:10, flexShrink:0 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            {[
+              { label:"Début",      value: task.start ? fmt(task.start) : "—", mono:true },
+              { label:"Fin",        value: task.end   ? fmt(task.end)   : "—", mono:true },
+              { label:"Jours ouvrés", value: task.halfDay ? "½ journée" : (meta.wdays || "—"), mono:true },
+              { label:"Candidats",  value: candidatCountByKey[cfKey] || 0 },
+            ].map(f => (
+              <div key={f.label} style={{ background:"rgba(55,53,47,0.03)", borderRadius:8, padding:"10px 12px" }}>
+                <div style={{ fontSize:10, color:"#9c9a92", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>{f.label}</div>
+                <div style={{ fontSize:15, fontWeight:600, color:"#2c2c2a", fontFamily: f.mono?"monospace":"inherit" }}>{String(f.value)}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Barre avancement */}
+          {!task.halfDay && meta.prog.pct > 0 && (
+            <div>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#73726c", marginBottom:4 }}>
+                <span>Avancement</span>
+                <span style={{ fontWeight:600, color:"#2c2c2a" }}>{meta.prog.pct}%</span>
+              </div>
+              <div style={{ height:5, borderRadius:99, background:"rgba(55,53,47,0.1)", overflow:"hidden" }}>
+                <div style={{ height:"100%", width:`${meta.prog.pct}%`, background: meta.prog.pct===100?"#448361":"#cb912f", borderRadius:99, transition:"width 0.3s" }}/>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Liste candidats ── */}
+        <div style={{ flex:1, padding:"16px 22px", display:"flex", flexDirection:"column", gap:10, minHeight:0 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#73726c", textTransform:"uppercase", letterSpacing:"0.06em" }}>
+              Candidats
+            </div>
+            <span style={{ fontSize:11, color:"#9c9a92" }}>
+              {groupCandidats.length} inscrit{groupCandidats.length!==1?"s":""}
+            </span>
+          </div>
+
+          {groupCandidats.length === 0 ? (
+            <div style={{ textAlign:"center", padding:"24px 0", color:"#9c9a92", fontSize:12, fontStyle:"italic" }}>
+              Aucun candidat dans ce groupe
+            </div>
+          ) : (
+            <div style={{ 
+      overflowY:"auto",       // ← scroll ici
+      flex:1,
+      minHeight:0,            // ← indispensable pour que flex+overflow fonctionne
+      border:`1px solid rgba(55,53,47,0.1)`, 
+      borderRadius:8, 
+      overflow:"hidden auto", // ← horizontal caché, vertical auto
+      marginBottom:0,
+    }}>
+              {groupCandidats.map((c, i) => {
+                const st = C_STATUS_MAP[c.statut] || { bg:"#f1efe8", text:"#73726c", bd:"rgba(55,53,47,0.2)" };
+                const initials = `${(c.nom||"?").charAt(0)}${(c.prenom||"").charAt(0)}`.toUpperCase();
+                return (
+                  <div key={c.id||i} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", background: i%2===0?"#fff":"rgba(55,53,47,0.015)", borderBottom: i<groupCandidats.length-1?`1px solid rgba(55,53,47,0.07)`:"none" }}>
+                    {/* Avatar */}
+                    <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(55,53,47,0.08)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#73726c", flexShrink:0 }}>
+                      {initials}
+                    </div>
+                    {/* Nom */}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:13, fontWeight:500, color:"#2c2c2a", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {c.nom} {c.prenom}
+                      </div>
+                      {c.departement && (
+                        <div style={{ fontSize:11, color:"#9c9a92", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {c.departement}
+                        </div>
+                      )}
+                    </div>
+                    {/* Statut */}
+                    {c.statut && (
+                      <span style={{ fontSize:10, padding:"2px 7px", borderRadius:99, background:st.bg, color:st.text, border:`1px solid ${st.bd}`, fontWeight:500, flexShrink:0 }}>
+                        {c.statut}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{ padding:"12px 22px", borderTop:`1px solid rgba(55,53,47,0.1)`, flexShrink:0, display: "flex", gap: 10 }}>
+          <button
+            onClick={() => onPrint(task)}
+            style={{ 
+              flex: 1, 
+              padding:"8px 0", 
+              fontSize:13, 
+              fontWeight:500, 
+              color:"#37352f", 
+              background:"#fff", 
+              border:"1px solid rgba(55,53,47,0.2)", 
+              borderRadius:8, 
+              cursor:"pointer", 
+              fontFamily:"inherit", 
+              display:"flex", 
+              alignItems:"center", 
+              justifyContent:"center", 
+              gap:6 
+            }}
+          >
+            <Printer style={{ width:13,height:13 }}/> Émargement
+          </button>
+
+          <button
+            onClick={() => {
+    onEdit && onEdit(task);   // ← déclenche le switch + startEdit
+    onClose();                // ← ferme le drawer
+  }}
+            style={{ width:"50%", padding:"8px 0", fontSize:13, fontWeight:500, color:"#fff", background:"#2c2c2a", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
+          >
+            <Edit2 style={{ width:13,height:13 }}/> Modifier la tâche
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // GANTT VIEW
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
 // CALENDAR VIEW — À placer JUSTE AVANT function GanttView
 // ═══════════════════════════════════════════════════════════════
-function CalendarView({ displayTasksFiltered, metaCache, candidatCountByKey, conflictTypesMap, liveConflictTaskKeys, wd, sh, vacs, onEditTask }) {
+function CalendarView({ displayTasksFiltered, metaCache, candidatCountByKey, conflictTypesMap, liveConflictTaskKeys, wd, sh, vacs, onEditTask, candidats  }) {
   const today = new Date();
   const [viewYear,  setViewYear]  = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [hovered,   setHovered]   = useState(null);
   const [expandedDay, setExpandedDay] = useState(null);
-
+const [selectedTask, setSelectedTask] = useState(null);
+ const [printDoc, setPrintDoc] = useState(null);
 
   const prevMonth = () => { if (viewMonth===0){setViewYear(y=>y-1);setViewMonth(11);}else setViewMonth(m=>m-1); };
   const nextMonth = () => { if (viewMonth===11){setViewYear(y=>y+1);setViewMonth(0);}else setViewMonth(m=>m+1); };
@@ -2825,6 +3191,34 @@ function CalendarView({ displayTasksFiltered, metaCache, candidatCountByKey, con
 
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+      {printDoc && (
+        <AttendanceDesigner
+          doc={printDoc}
+          candidats={candidats}
+          tasks={displayTasksFiltered}
+          onClose={() => setPrintDoc(null)}
+        />
+      )}
+      {/* Drawer */}
+    {selectedTask && (
+        <TaskDrawer
+          task={selectedTask}
+          candidats={candidats}
+          metaCache={metaCache}
+          candidatCountByKey={candidatCountByKey}
+          conflictTypesMap={conflictTypesMap}
+          onClose={() => setSelectedTask(null)}
+          onEdit={onEditTask}
+          // Ajoutez la fonction onPrint ici :
+          onPrint={(t) => {
+            // On crée un objet "doc" virtuel pour le designer
+            setPrintDoc({
+              nom: `Liste d'émargement - ${t.group} - G${t.groupe}`,
+              type: "Émargement"
+            });
+          }}
+        />
+      )}
       {/* Navigation */}
       <div style={{ display:"flex",alignItems:"center",gap:8 }}>
         <button onClick={prevMonth} style={{ width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",border:`1px solid ${T.pageBdr}`,borderRadius:4,background:"#fff",cursor:"pointer",color:T.pageSub }}>
@@ -2905,7 +3299,7 @@ function CalendarView({ displayTasksFiltered, metaCache, candidatCountByKey, con
       <div key={ti}
         onMouseEnter={() => setHovered(key)}
         onMouseLeave={() => setHovered(null)}
-        onClick={() => onEditTask && onEditTask(task)}
+        onClick={() => setSelectedTask(task)}
         title={`${task.group} — G${task.groupe}${count?` · ${count} cand.`:""}${meta.prog.pct?` · ${meta.prog.pct}%`:""}`}
         style={{ borderRadius:3,padding:"2px 5px",fontSize:10,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:3,overflow:"hidden",background:isConf?(cfColor+"18"):isHov?`${pal.text}1a`:pal.bg,border:`1px solid ${isConf?cfColor:isHov?pal.text:(pal.bd||"transparent")}`,color:isConf?cfColor:pal.text,transition:"all 0.08s",position:"relative" }}>
         <div style={{ width:5,height:5,borderRadius:"50%",background:isConf?cfColor:pal.text,flexShrink:0,opacity:isStart?1:0.3 }} />
@@ -2966,6 +3360,81 @@ function CalendarView({ displayTasksFiltered, metaCache, candidatCountByKey, con
           Avancement (barre en bas)
         </div>
       </div>
+
+    </div>
+  );
+}
+
+function ConfirmMoveModal({ pendingUpdate, onConfirm, onCancel }) {
+  const { label, groupe, oldStart, oldEnd, start, end, delta } = pendingUpdate;
+
+  const pillStyle = (isNew) => ({
+    fontSize: 12, fontFamily: "monospace", padding: "3px 9px",
+    borderRadius: 6,
+    border: `0.5px solid ${isNew ? "#B5D4F4" : "rgba(55,53,47,0.18)"}`,
+    color: isNew ? "#185FA5" : "#73726c",
+    background: isNew ? "#E6F1FB" : "#fff",
+  });
+
+  const fmt = (s) => {
+    if (!s) return "—";
+    const [y, m, d] = s.split("-");
+    return `${d}/${m}/${y}`;
+  };
+
+  const deltaLabel = delta > 0 ? `+${delta}j` : delta < 0 ? `${delta}j` : "même date";
+  const deltaColor = delta > 0 ? { bg:"#EAF3DE", text:"#3B6D11", border:"#C0DD97" }
+                   : delta < 0 ? { bg:"#FCEBEB", text:"#A32D2D", border:"#F7C1C1" }
+                   : { bg:"#F1EFE8", text:"#5F5E5A", border:"#D3D1C7" };
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(0,0,0,0.32)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{background:"#fff",borderRadius:16,border:"0.5px solid rgba(55,53,47,0.15)",padding:28,width:360,boxSizing:"border-box"}}>
+
+        <div style={{width:36,height:36,borderRadius:10,background:"#f7f7f7",border:"0.5px solid rgba(55,53,47,0.15)",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:16}}>
+          <CalendarRange style={{width:16,height:16,color:"#73726c"}}/>
+        </div>
+
+        <div style={{fontSize:15,fontWeight:500,color:"#2c2c2a",marginBottom:4}}>
+          Confirmer le déplacement
+        </div>
+        <div style={{fontSize:12,color:"#9c9a92",marginBottom:20}}>
+          Les dates des candidats associés seront mises à jour.
+        </div>
+
+        <div style={{fontSize:14,fontWeight:600,color:"#2c2c2a",marginBottom:16}}>
+          {label}{groupe ? ` — Grp ${groupe}` : ""}
+        </div>
+
+        <div style={{background:"#f7f7f7",borderRadius:10,padding:"14px 16px",marginBottom:16,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,fontWeight:600,color:"#9c9a92",width:48,textTransform:"uppercase",letterSpacing:"0.04em",flexShrink:0}}>Avant</span>
+            <span style={pillStyle(false)}>{fmt(oldStart)}</span>
+            <span style={{color:"#9c9a92",fontSize:12}}>→</span>
+            <span style={pillStyle(false)}>{fmt(oldEnd)}</span>
+          </div>
+          <div style={{height:"0.5px",background:"rgba(55,53,47,0.12)"}}/>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,fontWeight:600,color:"#9c9a92",width:48,textTransform:"uppercase",letterSpacing:"0.04em",flexShrink:0}}>Après</span>
+            <span style={pillStyle(true)}>{fmt(start)}</span>
+            <span style={{color:"#378ADD",fontSize:12}}>→</span>
+            <span style={pillStyle(true)}>{fmt(end)}</span>
+          </div>
+        </div>
+
+        <div style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:11,fontWeight:500,padding:"3px 10px",borderRadius:99,marginBottom:20,background:deltaColor.bg,color:deltaColor.text,border:`0.5px solid ${deltaColor.border}`}}>
+          {deltaLabel}
+        </div>
+
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button onClick={onCancel} style={{padding:"7px 16px",fontSize:13,borderRadius:8,border:"0.5px solid rgba(55,53,47,0.25)",background:"#fff",color:"#73726c",cursor:"pointer",fontFamily:"inherit"}}>
+            Annuler
+          </button>
+          <button onClick={onConfirm} style={{padding:"7px 16px",fontSize:13,borderRadius:8,border:"none",background:"#2C2C2A",color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:500,display:"flex",alignItems:"center",gap:6}}>
+            <Check style={{width:12,height:12}}/> Confirmer
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2996,6 +3465,7 @@ function GanttView({
   const [ganttSortDir,     setGanttSortDir]     = useState("asc");
   const [ganttFilters,     setGanttFilters]     = useState({ group:"", groupe:"", wdays:"", start:"", end:"" });
   const [showGanttFilters, setShowGanttFilters] = useState(false);
+const [pendingUpdate, setPendingUpdate] = useState(null);
 
   // ── Mode d'affichage
   const [viewMode, setViewMode] = useState("gantt"); // "gantt" | "calendar"
@@ -3158,15 +3628,48 @@ function GanttView({
     return rows;
   },[displayTasks,ganttFilters,ganttSortField,ganttSortDir,metaCache,candidatCountByKey]);
 
-  const updTask = useCallback(async (taskId,start,end)=>{
-    const task=tasks.find(t=>t.id===taskId||t._id===taskId); if(!task)return;
-    const theme=task.group, groupe=task.groupe||"";
-    setTasks(prev=>prev.map(t=>(t.id===taskId||t._id===taskId)?{...t,start,end}:t));
-    if(typeof setCandidats==="function") setCandidats(prev=>prev.map(c=>(c.theme===theme&&String(c.groupe)===String(groupe))?{...c,dateDebut:start,dateFin:end}:c));
-    if(typeof setDocuments==="function") setDocuments(prev=>prev.map(d=>(d.theme===theme&&String(d.groupe)===String(groupe))?{...d,dateDoc:start}:d));
-    try { await apiFetch(`/workspaces/${wsId}/gantt/group-dates`,{method:"PATCH",body:{theme,groupe:String(groupe),start,end}}); }
-    catch(err){ try{ await apiFetch(`/tasks/${taskId}/dates`,{method:"PATCH",body:{start,end}}); }catch(err2){ showToast("Erreur synchronisation : "+err2.message); } }
-  },[tasks,wsId,setTasks,setCandidats,setDocuments,showToast]);
+  const updTask = useCallback(async (taskId, start, end) => {
+  const task = tasks.find(t => t.id === taskId || t._id === taskId);
+  if (!task) return;
+  
+  const delta = (() => {
+    if (!task.start || !start) return 0;
+    const old = new Date(task.start), next = new Date(start);
+    const diff = Math.round((next - old) / (1000 * 60 * 60 * 24));
+    return diff;
+  })();
+
+  setPendingUpdate({
+    taskId,
+    start,
+    end,
+    oldStart: task.start,
+    oldEnd: task.end,
+    label: task.group,
+    groupe: task.groupe,
+    delta,                  // ← on passe le delta déjà calculé
+  });
+}, [tasks]);
+
+const confirmUpdate = useCallback(async () => {
+  if (!pendingUpdate) return;
+  const { taskId, start, end } = pendingUpdate;
+  const task = tasks.find(t => t.id === taskId || t._id === taskId);
+  if (!task) { setPendingUpdate(null); return; }
+  const theme = task.group, groupe = task.groupe || "";
+  setTasks(prev => prev.map(t => (t.id === taskId || t._id === taskId) ? { ...t, start, end } : t));
+  if (typeof setCandidats === "function")
+    setCandidats(prev => prev.map(c => (c.theme === theme && String(c.groupe) === String(groupe)) ? { ...c, dateDebut: start, dateFin: end } : c));
+  if (typeof setDocuments === "function")
+    setDocuments(prev => prev.map(d => (d.theme === theme && String(d.groupe) === String(groupe)) ? { ...d, dateDoc: start } : d));
+  try {
+    await apiFetch(`/workspaces/${wsId}/gantt/group-dates`, { method: "PATCH", body: { theme, groupe: String(groupe), start, end } });
+  } catch (err) {
+    try { await apiFetch(`/tasks/${taskId}/dates`, { method: "PATCH", body: { start, end } }); }
+    catch (err2) { showToast("Erreur synchronisation : " + err2.message); }
+  }
+  setPendingUpdate(null);
+}, [pendingUpdate, tasks, wsId, setTasks, setCandidats, setDocuments, showToast]);
 
   const updTaskSlot = useCallback(async (taskId,newSlot)=>{
     const task=tasks.find(t=>t.id===taskId||t._id===taskId); if(!task)return;
@@ -3188,12 +3691,20 @@ function GanttView({
 
   const allGroups = useMemo(()=>[...new Set(tasks.map(t=>t.group).filter(Boolean))],[tasks]);
 
-  const startEdit = t => {
-    setEditId(t.id);
-    let eGrp=t.groupe||"";
-    if(!eGrp&&t.name?.includes(" — Grp "))eGrp=t.name.split(" — Grp ")[1];
-    setForm({group:t.group||"",groupe:eGrp,start:t.start,end:t.end,nbJ:calcWD(t.start,t.end,wd,sh,vacs)});
-  };
+  const startEdit = (t) => {
+  setEditId(t.id);
+  let eGrp = t.groupe || "";
+  if (!eGrp && t.name?.includes(" — Grp ")) eGrp = t.name.split(" — Grp ")[1];
+  setForm({ group: t.group||"", groupe: eGrp, start: t.start, end: t.end, nbJ: calcWD(t.start, t.end, wd, sh, vacs) });
+
+  // ← Scroll jusqu'à la ligne
+  setTimeout(() => {
+    const idx = displayTasksFiltered.findIndex(dt => dt.id === t.id || dt._id === t.id);
+    if (idx >= 0 && listRef.current) {
+      listRef.current.scrollTo({ top: idx * RH, behavior: "smooth" });
+    }
+  }, 80);
+};
 
   const syncSnapshot = async (updatedTasks)=>{ if(!wsId)return; try{ await apiFetch(`/workspaces/${wsId}/gantt/tasks`,{method:"PATCH",body:{tasks:updatedTasks}}); }catch(err){console.warn("Sync:",err.message);} };
 
@@ -3309,7 +3820,7 @@ function GanttView({
   // RENDER
   // ══════════════════════════════════════════════════════════════
   return (
-    <div ref={contRef} style={{padding:"60px 40px 80px",width:"100%",boxSizing:"border-box"}}>
+    <div ref={contRef} style={{padding:"30px 40px 80px",width:"100%",boxSizing:"border-box"}}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse-conflict{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
 
       {/* Titre */}
@@ -3439,7 +3950,13 @@ function GanttView({
           conflictTypesMap={conflictTypesMap}
           liveConflictTaskKeys={liveConflictTaskKeys}
           wd={wd} sh={sh} vacs={vacs}
-          onEditTask={task=>startEdit(task)}
+          candidats={candidats}
+          onEditTask={(task) => {
+    setViewMode("gantt");        // ← bascule vers Gantt
+    setTimeout(() => {
+      startEdit(task);           // ← ouvre l'édition après le rendu
+    }, 50);
+  }}
         />
       )}
 
@@ -3459,8 +3976,18 @@ function GanttView({
                     return(
                       <div key={col.key} onClick={()=>{ if(!sortable)return; if(ganttSortField===col.key)setGanttSortDir(d=>d==="asc"?"desc":"asc"); else{setGanttSortField(col.key);setGanttSortDir("asc");} }}
                         style={{...cs(col.sw),justifyContent:CHDR[col.key]??"flex-start",padding:["wdays","start","end","count"].includes(col.key)?"0 4px":"0 8px",height:"100%",alignItems:"flex-end",paddingBottom:4,cursor:sortable?"pointer":"default",userSelect:"none",gap:3,background:isSorted?`${T.accent}06`:"transparent"}}>
-                        <span style={{fontSize:10,fontWeight:600,color:isSorted?T.accent:T.pageTer,textTransform:"uppercase",letterSpacing:"0.06em",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{col.label}</span>
-                        {sortable&&(isSorted?(ganttSortDir==="asc"?<ArrowUp style={{width:9,height:9,color:T.accent,flexShrink:0}}/>:<ArrowDown style={{width:9,height:9,color:T.accent,flexShrink:0}}/>):<ArrowUpDown style={{width:9,height:9,color:"rgba(55,53,47,0.2)",flexShrink:0}}/>)}
+<span style={{
+  fontSize: 10,
+  fontWeight: 600,
+  color: isSorted ? T.accent : T.pageTer,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  whiteSpace: "nowrap",
+  overflow: "visible",   // le texte déborde si besoin
+}}>
+  {col.label}
+</span>                        
+{sortable&&(isSorted?(ganttSortDir==="asc"?<ArrowUp style={{width:9,height:9,color:T.accent,flexShrink:0}}/>:<ArrowDown style={{width:9,height:9,color:T.accent,flexShrink:0}}/>):<ArrowUpDown style={{width:9,height:9,color:"rgba(55,53,47,0.2)",flexShrink:0}}/>)}
                       </div>
                     );
                   })}
@@ -3580,6 +4107,14 @@ function GanttView({
           <div>Importez vos données via l'assistant multi-bases pour voir la planification.</div>
         </div>
       )}
+
+      {pendingUpdate && (
+  <ConfirmMoveModal
+    pendingUpdate={pendingUpdate}
+    onConfirm={confirmUpdate}
+    onCancel={() => setPendingUpdate(null)}
+  />
+)}
     </div>
   );
 }
@@ -6551,7 +7086,7 @@ function CandidatsView({currentUser, candidats, setCandidats, tasks, setTasks, w
   const filterBtn = (active, onClick, children) => (<button onClick={onClick} style={{ padding: "3px 10px", borderRadius: 4, fontSize: 13, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${active ? "rgba(55,53,47,0.3)" : T.pageBdr}`, background: active ? "rgba(55,53,47,0.07)" : "transparent", color: active ? T.pageText : T.pageSub, fontWeight: active ? 600 : 400, display: "flex", gap: 5, alignItems: "center", whiteSpace: "nowrap" }}>{children}</button>);
   const canImport = !currentUser?.parentId || currentUser?.permissions?.canImportExcel;
   return (
-    <div style={{ padding: "60px 40px 80px", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ padding: "30px 40px 80px", width: "100%", boxSizing: "border-box" }}>
       {modal && <CModal item={modal === "new" ? null : modal} onClose={() => setModal(null)} onSave={save} />}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}><Users style={{ width: 24, height: 24, color: T.pageSub, strokeWidth: 1.6 }} /><h1 style={{ fontSize: 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em", margin: 0 }}>Candidats</h1></div>
 
@@ -7363,7 +7898,7 @@ const generatePresenceWord = (theme, grp, grpCands) => {
   );
 }
 
-function AttendanceDesigner({ doc, candidats, tasks = [], onClose }) {
+function AttendanceDesigner({ doc, candidats, tasks = [], onClose, ws }) {
   const printRef = useRef(null);
   const [showDownloadAll, setShowDownloadAll] = useState(false);
 
@@ -7386,8 +7921,10 @@ function AttendanceDesigner({ doc, candidats, tasks = [], onClose }) {
     return "";
   };
 
-  const [entreprise, setEntreprise] = useState(findExtra("entreprise") || "");
-  const [logoUrl, setLogoUrl] = useState(findExtra("logoUrl") || "");
+  const [entreprise, setEntreprise] = useState(ws?.company || findExtra("entreprise") || "");
+  const defaultLogo = ws?.logoUrl ? `${API_BASE.replace("/api", "")}${ws.logoUrl}` : findExtra("logoUrl");
+  const [logoUrl, setLogoUrl] = useState(defaultLogo || "");
+  
   const logoInputRef = useRef(null);
 
   // Calcul des jours de formation depuis les tasks
@@ -7447,157 +7984,178 @@ function AttendanceDesigner({ doc, candidats, tasks = [], onClose }) {
   const workDays = getWorkDays();
 
 const handleExportWord = () => {
-  const task = tasks.find(
-    (t) => t.group?.trim() === theme?.trim() && String(t.groupe) === String(grp)
-  );
-  
-  const workDays = getWorkDays(); 
+  const workDays = getWorkDays();
 
   const dateStr = workDays.length > 0
     ? `${workDays.map(d => String(d.getDate()).padStart(2, '0')).join('-')}/${String(workDays[0].getMonth() + 1).padStart(2, '0')}/${workDays[0].getFullYear()}`
     : "________________";
 
-  const html = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-    <head>
-      <meta charset="UTF-8">
-      <!--[if gte mso 9]>
-      <xml>
-        <w:WordDocument>
-          <w:View>Print</w:View>
-          <w:Zoom>100</w:Zoom>
-          <w:DoNotOptimizeForBrowser/>
-        </w:WordDocument>
-      </xml>
-      <![endif]-->
-      <style>
-        @page Section1 {
-          size: 841.9pt 595.3pt; 
-          mso-page-orientation: landscape;
-          margin: 1.2cm 1.2cm 1.2cm 1.2cm;
-          mso-footer-margin: 35.4pt;
-          mso-footer: f1; 
+  const MAX_LOGO_HEIGHT = 50; // ✅ Hauteur max du logo en pixels
+
+  const getLogoHtml = () => {
+    if (!logoUrl) return Promise.resolve("<b>LOGO</b>");
+    
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const naturalW = img.naturalWidth;
+        const naturalH = img.naturalHeight;
+
+        // ✅ Redimensionner proportionnellement si trop grand
+        let finalW = naturalW;
+        let finalH = naturalH;
+
+        if (naturalH > MAX_LOGO_HEIGHT) {
+          const ratio = MAX_LOGO_HEIGHT / naturalH;
+          finalH = MAX_LOGO_HEIGHT;
+          finalW = Math.round(naturalW * ratio);
         }
-        div.Section1 { page: Section1; }
 
-        body { font-family: Arial, sans-serif; font-size: 10pt; }
-        table { border-collapse: collapse; width: 100%; }
-        .no-border { border: none !important; }
-        
-        .main-table th, .main-table td { border: 0.5pt solid black; padding: 4px 6px; font-size: 9pt; }
-        .header-bg { background-color: #DCE6F1; font-weight: bold; text-align: center; }
-        
-        .title { font-size: 14pt; font-weight: bold; text-align: center; font-style: italic; text-transform: uppercase; }
-        
-        /* FOOTER FIXÉ EN BAS */
-        #f1 { mso-element: footer; }
-        p.MsoFooter { margin: 0; font-size: 9pt; line-height: 1.3; }
-        .sig-text { font-size: 10pt; }
-      </style>
-    </head>
-    <body>
-      <div class="Section1">
-        
-        <!-- HEADER -->
-        <table class="no-border" style="margin-bottom:15px;">
-          <tr>
-            <td class="no-border" style="width:20%;">
-              ${logoUrl ? `<img src="${logoUrl}" width="120">` : "<b>LOGO</b>"}
-            </td>
-            <td class="no-border" style="width:60%;">
-              <div class="title">LISTE DE PRESENCE PAR ACTION ET PAR GROUPE</div>
-            </td>
-            <td class="no-border" style="width:20%;"></td>
-          </tr>
-        </table>
+        resolve(`<img src="${logoUrl}" width="${finalW}" height="${finalH}" style="width:${finalW}px; height:${finalH}px;">`);
+      };
+      img.onerror = () => resolve(`<img src="${logoUrl}" width="110" height="50">`);
+      img.src = logoUrl;
+    });
+  };
 
-        <!-- INFOS -->
-        <table class="no-border" style="margin-bottom:10px;">
-          <tr>
-            <td class="no-border" style="width:140px; font-weight:bold;">Entreprise</td>
-            <td class="no-border">: ${entreprise || "________________"}</td>
-            <td class="no-border" style="text-align:right; font-weight:bold;">G ${grp}</td>
-          </tr>
-          <tr>
-            <td class="no-border" style="font-weight:bold;">Thème de l'action</td>
-            <td class="no-border" colspan="2">: ${theme}</td>
-          </tr>
-          <tr>
-            <td class="no-border" style="font-weight:bold;">Jours de réalisation</td>
-            <td class="no-border" colspan="2">: ${dateStr}</td>
-          </tr>
-        </table>
+  getLogoHtml().then((logoHtml) => {
+    const html = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="UTF-8">
+        <!--[if gte mso 9]>
+        <xml>
+          <w:WordDocument>
+            <w:View>Print</w:View>
+            <w:Zoom>100</w:Zoom>
+            <w:DoNotOptimizeForBrowser/>
+          </w:WordDocument>
+        </xml>
+        <![endif]-->
+        <style>
+          @page Section1 {
+            size: 841.9pt 595.3pt;
+            mso-page-orientation: landscape;
+            margin: 1.5cm 1.5cm 1.5cm 1.5cm;
+          }
+          div.Section1 { page: Section1; }
 
-        <!-- TABLEAU PRINCIPAL -->
-        <table class="main-table">
-          <thead>
-            <tr class="header-bg">
-              <th rowspan="2">Nom</th>
-              <th rowspan="2">Prénom</th>
-              <th rowspan="2">N° CIN</th>
-              <th rowspan="2">N°CNSS</th>
-              <th colspan="3">C.S.P</th>
-              ${workDays.map(d => `<th rowspan="2">${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}</th>`).join('')}
+          body { font-family: Arial, sans-serif; font-size: 10pt; margin: 0; padding: 0; }
+          table { border-collapse: collapse; width: 100%; }
+
+          .main-table th, .main-table td { border: 0.5pt solid black; padding: 3px 5px; font-size: 8.5pt; }
+          .header-bg { background-color: #DCE6F1; font-weight: bold; text-align: center; }
+
+          .title { font-size: 13pt; font-weight: bold; text-align: center; font-style: italic; text-transform: uppercase; }
+          .sig-text { font-size: 9.5pt; }
+          .legend-text { font-size: 8.5pt; }
+
+          td.no-border, th.no-border { border: none !important; }
+        </style>
+      </head>
+      <body>
+        <div class="Section1">
+
+          <!-- TITRE -->
+          <p class="title" style="margin:0 0 6px 0;">LISTE DE PRESENCE PAR ACTION ET PAR GROUPE</p>
+
+          <!-- HEADER LOGO -->
+          <table style="border-collapse:collapse; width:100%; margin-bottom:8px;">
+            <tr>
+              <td class="no-border" style="width:15%; vertical-align:middle;">
+                ${logoHtml}
+              </td>
+              <td class="no-border" style="width:85%;"></td>
             </tr>
-            <tr class="header-bg">
-              <th width="25">C</th><th width="25">E</th><th width="25">O</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${list.map(c => {
-              const csp = classifyCSP(c.extraData?.csp || c.csp || "");
-              return `
-                <tr>
-                  <td style="font-weight:bold;">${(c.nom || "").toUpperCase()}</td>
-                  <td>${c.prenom || ""}</td>
-                  <td align="center">${c.cin || ""}</td>
-                  <td align="center"></td>
-                  <td align="center">${csp === "C" ? "X" : ""}</td>
-                  <td align="center">${csp === "E" ? "X" : ""}</td>
-                  <td align="center">${csp === "O" ? "X" : ""}</td>
-                  ${workDays.map(() => `<td></td>`).join('')}
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
+          </table>
 
-        <!-- FOOTER (Exactement comme l'image) -->
-        <div style="mso-element:footer" id="f1">
-          <!-- Légendes à gauche -->
-          <p class="MsoFooter">(*) C.S.P : Catégorie socio-professionnelle</p>
-          <p class="MsoFooter">C: Cadre – E: Employé – O: Ouvrier</p>
-          
+          <!-- INFOS -->
+          <table style="border-collapse:collapse; width:100%; margin-bottom:8px;">
+            <tr>
+              <td class="no-border" style="width:130px; font-weight:bold;">Entreprise</td>
+              <td class="no-border">: ${entreprise || "________________"}</td>
+              <td class="no-border" style="text-align:right; font-weight:bold;">G ${grp}</td>
+            </tr>
+            <tr>
+              <td class="no-border" style="font-weight:bold;">Thème de l'action</td>
+              <td class="no-border" colspan="2">: ${theme}</td>
+            </tr>
+            <tr>
+              <td class="no-border" style="font-weight:bold;">Jours de réalisation</td>
+              <td class="no-border" colspan="2">: ${dateStr}</td>
+            </tr>
+          </table>
+
+          <!-- TABLEAU PRINCIPAL -->
+          <table class="main-table" style="margin-bottom:8px;">
+            <thead>
+              <tr class="header-bg">
+                <th rowspan="2" style="width:130px;">Nom</th>
+                <th rowspan="2" style="width:160px;">Prénom</th>
+                <th rowspan="2" style="width:80px;">N° CIN</th>
+                <th rowspan="2" style="width:80px;">N°CNSS</th>
+                <th colspan="3">C.S.P</th>
+                ${workDays.map(d => `<th rowspan="2">${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}</th>`).join('')}
+              </tr>
+              <tr class="header-bg">
+                <th style="width:25px;">C</th>
+                <th style="width:25px;">E</th>
+                <th style="width:25px;">O</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${list.map(c => {
+                const csp = classifyCSP(c.extraData?.csp || c.csp || "");
+                return `
+                  <tr>
+                    <td style="font-weight:bold;">${(c.nom || "").toUpperCase()}</td>
+                    <td>${c.prenom || ""}</td>
+                    <td align="center">${c.cin || ""}</td>
+                    <td align="center"></td>
+                    <td align="center">${csp && csp === "C" ? "X" : ""}</td>
+<td align="center">${csp && csp === "E" ? "X" : ""}</td>
+<td align="center">${csp && csp === "O" ? "X" : ""}</td>
+                    ${workDays.map(() => `<td></td>`).join('')}
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+
+          <!-- LÉGENDES -->
+          <p class="legend-text" style="margin:2px 0;">(*) C.S.P : Catégorie socio-professionnelle</p>
+          <p class="legend-text" style="margin:2px 0;">C: Cadre – E: Employé – O: Ouvrier</p>
+
           <br/>
 
-          <!-- Blocs de signatures -->
-          <table class="no-border" style="width:100%;">
+          <!-- SIGNATURES -->
+          <table style="border-collapse:collapse; width:100%; margin-top:6px;">
             <tr>
-              <td class="no-border sig-text" style="width:50%; text-align:left; vertical-align:top;">
+              <td class="no-border" style="width:50%; text-align:left; vertical-align:top;" class="sig-text">
                 Cachet de l'organisme de formation<br/>
                 et identité du signataire
               </td>
-              <td class="no-border sig-text" style="width:50%; text-align:right; vertical-align:top;">
+              <td class="no-border" style="width:50%; text-align:right; vertical-align:top;" class="sig-text">
                 Cachet et signature du responsable<br/>
                 de formation de l'entreprise
               </td>
             </tr>
           </table>
+
         </div>
+      </body>
+      </html>
+    `;
 
-      </div>
-    </body>
-    </html>
-  `;
-
-  const blob = new Blob(["\ufeff", html], { type: "application/msword;charset=utf-8" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `Liste_Presence_${theme}_G${grp}.doc`;
-  link.click();
+    const blob = new Blob(["\ufeff", html], { type: "application/msword;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `Liste_Presence_${theme}_G${grp}.doc`;
+    link.click();
+  });
 };
 
-  const generatePresencePDF = () => {
+const generatePresencePDF = () => {
   const doc = new jsPDF({
     orientation: "landscape",
     unit: "mm",
@@ -7607,42 +8165,61 @@ const handleExportWord = () => {
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
 
-  // 2. Logo
+  // Logo — s'adapte automatiquement aux proportions de n'importe quelle image
   if (logoUrl) {
-    try { doc.addImage(logoUrl, "PNG", 15, 10, 30, 12); } catch (e) {}
+    try {
+      const img = new Image();
+      img.src = logoUrl;
+      const maxH = 18;          // hauteur max souhaitée en mm
+      const maxW = 40;          // largeur max souhaitée en mm
+      const ratio = img.naturalWidth / img.naturalHeight;
+      let logoW, logoH;
+
+      if (ratio >= 1) {
+        // Image large (paysage) → contrainte par la largeur
+        logoW = Math.min(maxW, maxH * ratio);
+        logoH = logoW / ratio;
+      } else {
+        // Image haute (portrait) → contrainte par la hauteur
+        logoH = maxH;
+        logoW = logoH * ratio;
+      }
+
+      doc.addImage(logoUrl, "PNG", 15, 8, logoW, logoH);
+    } catch (e) {}
   }
 
-  // 3. Titre
+  // Titre
   doc.setFontSize(13);
   doc.setFont("helvetica", "bolditalic");
   doc.text("LISTE DE PRESENCE PAR ACTION ET PAR GROUPE", pageWidth / 2, 18, { align: "center" });
 
-  // 4. Bloc d'informations
+  // Bloc d'informations
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text("Entreprise",          15, 32);
-  doc.text("Thème de l'action",   15, 38);
-  doc.text("Jours de réalisation",15, 44);
+  doc.text("Entreprise",           15, 30);
+  doc.text("Thème de l'action",    15, 36);
+  doc.text("Jours de réalisation", 15, 42);
 
   doc.setFont("helvetica", "normal");
-  doc.text(`: ${entreprise || "________________"}`, 55, 32);
-  doc.text(`: ${theme}`, 55, 38);
+  doc.text(`: ${entreprise || "________________"}`, 55, 30);
+  doc.text(`: ${theme}`, 55, 36);
 
   const dateStr = workDays.length > 0
     ? `: ${workDays.map((d) => String(d.getDate()).padStart(2, "0")).join("-")}/${String(workDays[0].getMonth() + 1).padStart(2, "0")}/${workDays[0].getFullYear()}`
     : ": ________________";
-  doc.text(dateStr, 55, 44);
+  doc.text(dateStr, 55, 42);
 
   doc.setFont("helvetica", "bold");
-  doc.text(`G ${grp}`, pageWidth - 20, 38, { align: "right" });
+  doc.text(`G ${grp}`, pageWidth - 20, 36, { align: "right" });
 
-  // 5. Tableau
+  // Tableau
   const head = [
     [
-      { content: "Nom",     rowSpan: 2, styles: { halign: "center", valign: "middle" } },
-      { content: "Prénom",  rowSpan: 2, styles: { halign: "center", valign: "middle" } },
-      { content: "N° CIN",  rowSpan: 2, styles: { halign: "center", valign: "middle" } },
-      { content: "N°CNSS",  rowSpan: 2, styles: { halign: "center", valign: "middle" } },
+      { content: "Nom",    rowSpan: 2, styles: { halign: "center", valign: "middle" } },
+      { content: "Prénom", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
+      { content: "N° CIN", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
+      { content: "N°CNSS", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
       { content: "C.S.P", colSpan: 3, styles: { halign: "center" } },
       ...workDays.map((d) => ({
         content: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
@@ -7660,15 +8237,15 @@ const handleExportWord = () => {
       c.prenom || "",
       c.cin || c.extraData?.cin || "",
       "",
-      csp === "C" ? "X" : "",
-      csp === "E" ? "X" : "",
-      csp === "O" ? "X" : "",
+      csp && csp === "C" ? "X" : "",
+csp && csp === "E" ? "X" : "",
+csp && csp === "O" ? "X" : "",
       ...workDays.map(() => ""),
     ];
   });
 
   autoTable(doc, {
-    startY: 48,
+    startY: 46,
     margin: { bottom: 45 },
     head: head,
     body: body,
@@ -7684,21 +8261,18 @@ const handleExportWord = () => {
     },
   });
 
-  // 6. FOOTER
+  // Footer
   const footerY = pageHeight - 20;
 
   doc.setFontSize(8.5);
   doc.setFont("helvetica", "normal");
 
-  // Légende
   doc.text("(*) C.S.P : Catégorie socio-professionnelle", 15, footerY - 16);
   doc.text("C: Cadre – E: Employé – O: Ouvrier",          15, footerY - 11);
 
-  // Bloc gauche — même marge que la légende
   doc.text("Cachet de l'organisme de formation", 15, footerY);
   doc.text("et identité du signataire",           15, footerY + 5);
 
-  // Bloc droit — aligné bord droit
   doc.text("Cachet et signature du responsable", pageWidth - 15, footerY,     { align: "right" });
   doc.text("de formation de l'entreprise",        pageWidth - 15, footerY + 5, { align: "right" });
 
@@ -7733,13 +8307,14 @@ const handleExportWord = () => {
     })()
   : `: ${findExtra("dates") || "________________"}`;
 
-  const classifyCSP = (csp = "") => {
-    const v = (csp || "").toLowerCase();
-    if (["ingénieurs","cadre","cadres","manager"].some(k => v.includes(k))) return "C";
-    if (["superviseur","maîtrise","technicien","employé"].some(k => v.includes(k))) return "E";
-    if (["ouvrier","opérateur"].some(k => v.includes(k))) return "O";
-    return "C";
-  };
+  const classifyCSP = (csp) => {
+  if (!csp) return ""; // ← retourne vide si undefined/null/""
+  const val = csp.trim().toUpperCase();
+  if (val === "C" || val === "CADRE") return "C";
+  if (val === "E" || val === "EMPLOYE" || val === "EMPLOYÉ") return "E";
+  if (val === "O" || val === "OUVRIER") return "O";
+  return ""; // ← aussi vide si non reconnu
+};
 
   const handleLogoUpload = (e) => {
     const file = e.target.files?.[0];
@@ -9589,7 +10164,7 @@ function SyntheseCoutsDesigner({ doc, candidats, tasks, onClose }) {
   );
 }
 
-function DocsView({currentUser, documents, setDocuments, wsId, showToast, candidats, tasks }) {
+function DocsView({currentUser, documents, setDocuments, wsId, showToast, candidats, tasks, ws  }) {
   const [syntheseCoutsItem, setSyntheseCoutsItem] = useState(null);
   const [recapItem, setRecapItem] = useState(null);
   const [ficheTechItem, setFicheTechItem] = useState(null);
@@ -9665,7 +10240,7 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
   
 
   return (
-    <div style={{ padding: "60px 40px 80px", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ padding: "30px 40px 80px", width: "100%", boxSizing: "border-box" }}>
 
       {/* ── Modals — TOUS DANS LE RETURN ── */}
       {modal && (
@@ -9680,6 +10255,7 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
           doc={previewItem}
           candidats={candidats}
           tasks={tasks}          // ← ajouter cette prop
+          ws={ws}
           onClose={() => setPreviewItem(null)}
         />
       )}
@@ -10569,8 +11145,21 @@ const updateWs = updatedRaw => {
         @keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
       `}</style>
       <ToastContainer />
-      {showCreate && <WsModal onClose={() => setShowCreate(false)} onCreate={createWs} />}
-      <Sidebar workspaces={workspaces} activeWs={activeWs} onSelectWs={id => { setActiveWs(id); setSection("overview"); }} section={section} onSection={setSection} onCreateWs={() => setShowCreate(true)} open={sideOpen} apiOnline={apiOnline} currentUser={currentUser} onLogout={logout} />
+{showCreate && (
+  <WsModal
+    onClose={() => setShowCreate(false)}
+    onCreate={async (data) => {
+      const res = await apiFetch("/workspaces", { method: "POST", body: data });
+      const ws = res.data || res;
+      ws.id = ws._id || ws.id;
+      ws.company = ws.name;
+      setWorkspaces(prev => [ws, ...prev]);
+      setActiveWs(ws.id);
+      return ws;  // ← seul ajout
+    }}
+  />
+)}      
+<Sidebar workspaces={workspaces} activeWs={activeWs} onSelectWs={id => { setActiveWs(id); setSection("overview"); }} section={section} onSection={setSection} onCreateWs={() => setShowCreate(true)} open={sideOpen} apiOnline={apiOnline} currentUser={currentUser} onLogout={logout} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", marginLeft: sideOpen ? 240 : 0, transition: "margin-left 0.2s ease", minWidth: 0, overflow: "hidden" }}>
         <div style={{ height: 44, display: "flex", alignItems: "center", padding: "0 12px", gap: 2, flexShrink: 0, borderBottom: `1px solid ${T.pageBdr}`, background: "#fff" }}>
           <button onClick={() => setSideOpen(v => !v)} style={{ width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }} onMouseEnter={e => e.currentTarget.style.background = T.pageHov} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>{sideOpen ? <PanelLeftClose style={{ width: 15, height: 15 }} /> : <PanelLeftOpen style={{ width: 15, height: 15 }} />}</button>
@@ -10604,7 +11193,7 @@ onUpdateWs={updatedWs => setWorkspaces(prev => prev.map(w => w.id === updatedWs.
             <CandidatsView currentUser={currentUser} candidats={cands} setCandidats={setC} tasks={tasks} setTasks={setT} ws={ws} wsId={activeWs} showToast={showToast} setDocuments={setD} onUpdateWs={updateWs} />
           </div>
           <div style={{ display: section === "documents" ? "block" : "none", flex: 1, overflowY: "auto", position: "relative" }}>
-            <DocsView currentUser={currentUser} documents={docs} candidats={cands} tasks={tasks} setDocuments={setD} wsId={activeWs} showToast={showToast} />
+            <DocsView currentUser={currentUser} documents={docs} candidats={cands} tasks={tasks} setDocuments={setD} wsId={activeWs} showToast={showToast} ws={ws} />
           </div>
           <div style={{ display: section === "profile" ? "block" : "none", flex: 1, overflowY: "auto", position: "relative" }}>
             <ProfileView currentUser={currentUser} onSave={updateProfile} showToast={showToast} />

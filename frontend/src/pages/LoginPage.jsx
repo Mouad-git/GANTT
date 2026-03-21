@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import logo from '../assets/logo.png'
+import logo from '../assets/logoM2S.png'
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -72,13 +72,13 @@ export default function LoginPage() {
       }}>
         {/* Logo / Titre */}
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 0 }}>
             <img
   src={logo}
   alt="PlanAdmin logo"
   style={{
-    width: 52,
-    height: 52,
+    width: 80,
+    height: 'auto',
     objectFit: "contain",
     borderRadius: "50%",
     display: "block",
@@ -87,13 +87,13 @@ export default function LoginPage() {
 />
           </div>
           <h1 style={{
-            fontSize: 22,
+            fontSize: 25,
             fontWeight: 700,
             color: "#37352f",
             margin: 0,
             letterSpacing: "-0.02em",
           }}>
-            M2S FormaPlan
+            M2S Consulting
           </h1>
           <p style={{
             fontSize: 13,
