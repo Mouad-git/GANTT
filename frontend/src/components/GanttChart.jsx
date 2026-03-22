@@ -786,147 +786,425 @@ function ConflictBanner({
 // Sidebar, WsModal, Overview — inchangés
 // ─────────────────────────────────────────────────────────────
 
-function Sidebar({ workspaces, activeWs, onSelectWs, section, onSection, onCreateWs, open, apiOnline, currentUser, onLogout }) {
+function useWindowSize() {
+  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+  useEffect(() => {
+    const h = () => setSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return size;
+}
+// mobile < 640 | tablet 640–1024 | desktop > 1024
+ 
+ 
+// ══════════════════════════════════════════════════════
+// BOUTON HAMBURGER — dans votre layout App
+// Visible uniquement mobile / tablet
+// ══════════════════════════════════════════════════════
+function MenuToggleButton({ open, onToggle }) {
+  const { w } = useWindowSize();
+  if (w >= 1024) return null;
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        position: "fixed",
+        top: 12,
+        left: open ? 252 : 12,
+        zIndex: 31,
+        width: 32,
+        height: 32,
+        borderRadius: 6,
+        border: "1px solid rgba(55,53,47,0.15)",
+        background: "#fff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+        transition: "left 0.2s ease",
+      }}
+    >
+      {open
+        ? <X style={{ width: 14, height: 14, color: "#37352f" }} />
+        : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#37352f" strokeWidth="2" strokeLinecap="round">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+      }
+    </button>
+  );
+}
+ 
+ 
+// ══════════════════════════════════════════════════════
+// SIDEBAR RESPONSIVE COMPLÈTE
+// ══════════════════════════════════════════════════════
+function Sidebar({ workspaces, activeWs, onSelectWs, section, onSection, onCreateWs, open, onToggle, apiOnline, currentUser, onLogout }) {
+  const { w } = useWindowSize();
+  const isMobile = w < 640;
+ 
   const [wsOpen, setWsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const dropRef = useRef(null);
   const userMenuRef = useRef(null);
-  const ws = workspaces.find(w => w.id === activeWs);
-  useEffect(() => { if (!wsOpen) return; const h = e => { if (dropRef.current && !dropRef.current.contains(e.target)) setWsOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [wsOpen]);
-  useEffect(() => { if (!userMenuOpen) return; const h = e => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenuOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [userMenuOpen]);
-  const si = (active, onClick, children) => (<button onClick={onClick} style={{ width: "100%", display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", height: 28, borderRadius: 4, border: "none", background: active ? T.sidebarSel : "transparent", cursor: "pointer", textAlign: "left", transition: "background 0.08s", marginBottom: 1 }} onMouseEnter={e => { if (!active) e.currentTarget.style.background = T.sidebarHov; }} onMouseLeave={e => { e.currentTarget.style.background = active ? T.sidebarSel : "transparent"; }}>{children}</button>);
-  const initials = currentUser ? (currentUser.displayName || currentUser.username || "?").slice(0, 2).toUpperCase() : "?";
+  const ws = workspaces.find(wk => wk.id === activeWs);
+ 
+  useEffect(() => {
+    if (!wsOpen) return;
+    const h = e => { if (dropRef.current && !dropRef.current.contains(e.target)) setWsOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [wsOpen]);
+ 
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const h = e => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenuOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [userMenuOpen]);
+ 
+  // Ferme la sidebar après navigation sur mobile
+  const handleSection = (key) => {
+    onSection(key);
+    if (isMobile) onToggle?.();
+  };
+ 
+  const si = (active, onClick, children) => (
+    <button
+      onClick={onClick}
+      style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 6,
+        padding: "3px 8px", height: 28, borderRadius: 4, border: "none",
+        background: active ? T.sidebarSel : "transparent",
+        cursor: "pointer", textAlign: "left",
+        transition: "background 0.08s", marginBottom: 1,
+      }}
+      onMouseEnter={e => { if (!active) e.currentTarget.style.background = T.sidebarHov; }}
+      onMouseLeave={e => { e.currentTarget.style.background = active ? T.sidebarSel : "transparent"; }}
+    >
+      {children}
+    </button>
+  );
+ 
+  const initials = currentUser
+    ? (currentUser.displayName || currentUser.username || "?").slice(0, 2).toUpperCase()
+    : "?";
   const displayName = currentUser ? (currentUser.displayName || currentUser.username) : "Utilisateur";
   const roleLabel = currentUser?.role === "admin" ? "Administrateur" : "Utilisateur";
+ 
   return (
-    <aside style={{ position: "fixed", left: 0, top: 0, bottom: 0, zIndex: 30, width: open ? 240 : 0, background: T.sidebarBg, borderRight: `1px solid ${T.sidebarBdr}`, overflow: "hidden", transition: "width 0.2s ease", flexShrink: 0, display: "flex", flexDirection: "column" }}>
-      <div style={{ width: 240, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <div ref={dropRef} style={{ padding: "10px 8px 6px", position: "relative" }}>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px 10px" }}>
-  <img
-    src={logo}
-    alt="Logo"
-    style={{ width: 28, height: 28, borderRadius: 7, objectFit: "contain" }}
-  />
-  <span style={{
-    fontSize: 15, fontWeight: 700, color: T.sidebarText,
-    letterSpacing: "-0.02em"
-  }}>M2S Consulting</span>
-</div>
-
-<div style={{ height: 1, background: T.sidebarBdr, margin: "0 8px 6px" }} />
-
-          {si(false, () => setWsOpen(v => !v), <>
-<div style={{ width:20, height:20, borderRadius:4, flexShrink:0, background:"rgba(55,53,47,0.08)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
-  {ws?.logoUrl
-    ? <img src={`${API_BASE.replace("/api","")}${ws.logoUrl}`} alt="" style={{ width:"100%", height:"100%", objectFit:"contain" }}/>
-    : <Building2 style={{ width:12, height:12, color:T.sidebarText }}/>
-  }
-</div>            
-<span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: T.sidebarText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: "-0.01em" }}>{ws ? ws.company : "Workspace"}</span>
-            <ChevronDown style={{ width: 12, height: 12, color: T.sidebarSub, flexShrink: 0, transform: wsOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-          </>)}
-          {wsOpen && (
-            <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 8, right: 8, background: "#fff", borderRadius: 6, border: `1px solid ${T.sidebarBdr}`, boxShadow: "0 8px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)", zIndex: 100, overflow: "hidden", padding: "4px" }}>
-              {workspaces.map((w, index) => (
-                <button key={w.id || `ws-${index}`} onClick={() => { onSelectWs(w.id); setWsOpen(false); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 4, border: "none", background: w.id === activeWs ? T.sidebarSel : "transparent", cursor: "pointer", textAlign: "left", transition: "background 0.08s" }} onMouseEnter={e => e.currentTarget.style.background = T.sidebarHov} onMouseLeave={e => e.currentTarget.style.background = w.id === activeWs ? T.sidebarSel : "transparent"}>
-                  <div style={{ width: 18, height: 18, borderRadius: 3, background: "rgba(55,53,47,0.08)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Building2 style={{ width: 10, height: 10, color: T.sidebarText }} /></div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: T.sidebarText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.company}</div>
-                    <div style={{ fontSize: 11, color: T.sidebarSub }}>{fmtRangeShort(w)}</div>
-                  </div>
-                  {w.id === activeWs && <Check style={{ width: 12, height: 12, color: T.sidebarSub, flexShrink: 0 }} />}
-                </button>
-              ))}
-              <div style={{ height: 1, background: T.sidebarBdr, margin: "4px 0" }} />
-              <button onClick={() => { onCreateWs(); setWsOpen(false); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", transition: "background 0.08s" }} onMouseEnter={e => e.currentTarget.style.background = T.sidebarHov} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <Plus style={{ width: 14, height: 14, color: T.sidebarSub }} />
-                <span style={{ fontSize: 13, color: T.sidebarSub }}>Ajouter un workspace</span>
+    <>
+      {/* ── Overlay sombre derrière la sidebar (mobile seulement) ── */}
+      {isMobile && open && (
+        <div
+          onClick={onToggle}
+          style={{
+            position: "fixed", inset: 0, zIndex: 29,
+            background: "rgba(0,0,0,0.3)",
+            backdropFilter: "blur(1px)",
+          }}
+        />
+      )}
+ 
+      <aside style={{
+        position: "fixed", left: 0, top: 0, bottom: 0, zIndex: 30,
+        width: open ? 240 : 0,
+        background: T.sidebarBg,
+        borderRight: `1px solid ${T.sidebarBdr}`,
+        overflow: "hidden",
+        transition: "width 0.2s ease, box-shadow 0.2s ease",
+        flexShrink: 0,
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: isMobile && open ? "4px 0 24px rgba(0,0,0,0.15)" : "none",
+      }}>
+        <div style={{ width: 240, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+ 
+          {/* ── Branding ── */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 8px" }}>
+            <img
+              src={logo}
+              alt="Logo"
+              style={{ width: 28, height: 28, borderRadius: 7, objectFit: "contain" }}
+            />
+            <span style={{ fontSize: 15, fontWeight: 700, color: T.sidebarText, letterSpacing: "-0.02em" }}>
+              M2S Consulting
+            </span>
+            {/* Bouton ✕ fermeture sur mobile */}
+            {isMobile && (
+              <button
+                onClick={onToggle}
+                style={{
+                  marginLeft: "auto", width: 24, height: 24, borderRadius: 4,
+                  border: "none", background: "transparent", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: T.sidebarSub,
+                }}
+              >
+                <X style={{ width: 14, height: 14 }} />
               </button>
-            </div>
-          )}
-        </div>
-        <nav style={{ flex: 1, padding: "2px 8px", overflowY: "auto" }}>
-          {NAV.map(item => { const active = section === item.key; const Icon = item.Icon; return si(active, () => onSection(item.key), <><Icon style={{ width: 15, height: 15, flexShrink: 0, color: active ? T.sidebarText : T.sidebarSub, strokeWidth: active ? 2.2 : 1.8 }} /><span style={{ fontSize: 14, fontWeight: active ? 600 : 400, color: active ? T.sidebarText : T.sidebarSub, letterSpacing: "-0.003em" }}>{item.label}</span></>); })}
-        </nav>
-        {/* ── Footer : profil utilisateur ─────────────────────────────── */}
-        <div style={{ borderTop: `1px solid ${T.sidebarBdr}` }}>
-          {/* Indicateur API */}
-          <div style={{ padding: "5px 16px", display: "flex", alignItems: "center", gap: 5 }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: apiOnline ? "#448361" : "#d44c47", flexShrink: 0, transition: "background 0.3s" }} />
-            <span style={{ fontSize: 10, color: T.sidebarSub }}>{apiOnline ? "API connectée" : "Hors ligne"}</span>
+            )}
           </div>
-          {/* Profil utilisateur */}
-          <div ref={userMenuRef} style={{ position: "relative" }}>
-            <button
-              onClick={() => setUserMenuOpen(v => !v)}
-              style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "8px 12px 10px", border: "none", background: userMenuOpen ? T.sidebarHov : "transparent", cursor: "pointer", textAlign: "left", transition: "background 0.08s" }}
-              onMouseEnter={e => { if (!userMenuOpen) e.currentTarget.style.background = T.sidebarHov; }}
-              onMouseLeave={e => { if (!userMenuOpen) e.currentTarget.style.background = "transparent"; }}
-            >
-              {/* Avatar */}
-              <div style={{ width: 28, height: 28, borderRadius: "50%",
-  background: "rgba(55,53,47,0.1)",
-  display: "flex", alignItems: "center", justifyContent: "center",
-  flexShrink: 0, fontSize: 11, fontWeight: 600, color: "#37352f",
-  letterSpacing: "0.01em" }}>
-  {initials}
-</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.sidebarText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
-                <div style={{ fontSize: 10, color: T.sidebarSub }}>{roleLabel}</div>
+ 
+          <div style={{ height: 1, background: T.sidebarBdr, margin: "0 8px 6px" }} />
+ 
+          {/* ── Workspace selector ── */}
+          <div ref={dropRef} style={{ padding: "0 8px 6px", position: "relative" }}>
+            {si(false, () => setWsOpen(v => !v), <>
+              {/* Logo workspace — 28×28 */}
+              <div style={{
+                width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                border: "1px solid rgba(55,53,47,0.1)", background: "#fff",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
+              }}>
+                {ws?.logoUrl
+                  ? <img
+                      src={`${API_BASE.replace("/api", "")}${ws.logoUrl}`}
+                      alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "contain", padding: 3, boxSizing: "border-box" }}
+                    />
+                  : <Building2 style={{ width: 13, height: 13, color: T.sidebarText }} />
+                }
               </div>
-              <ChevronDown style={{ width: 12, height: 12, color: T.sidebarSub, flexShrink: 0, transform: userMenuOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-            </button>
-            {/* Menu déroulant */}
-            {userMenuOpen && (
-              <div style={{ position: "absolute", bottom: "calc(100% + 4px)", left: 8, right: 8, background: "#fff", borderRadius: 8, border: `1px solid ${T.sidebarBdr}`, boxShadow: "0 8px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)", zIndex: 200, overflow: "hidden", padding: "6px" }}>
-                {/* En-tête profil */}
-                <div style={{ padding: "8px 10px 10px", borderBottom: `1px solid ${T.sidebarBdr}`, marginBottom: 4 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 32, height: 32, borderRadius: "50%",
-  background: "rgba(55,53,47,0.1)",
-  display: "flex", alignItems: "center", justifyContent: "center",
-  flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#37352f" }}>
-  {initials}
-</div>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: T.sidebarText }}>{displayName}</div>
-                      <div style={{ fontSize: 11, color: T.sidebarSub }}>@{currentUser?.username}</div>
+              <span style={{
+                flex: 1, fontSize: 13, fontWeight: 600, color: T.sidebarText,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                letterSpacing: "-0.01em",
+              }}>
+                {ws ? ws.company : "Workspace"}
+              </span>
+              <ChevronDown style={{
+                width: 12, height: 12, color: T.sidebarSub, flexShrink: 0,
+                transform: wsOpen ? "rotate(180deg)" : "none",
+                transition: "transform 0.15s",
+              }} />
+            </>)}
+ 
+            {/* ── Dropdown workspaces ── */}
+            {wsOpen && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 2px)", left: 8, right: 8,
+                background: "#fff", borderRadius: 6,
+                border: `1px solid ${T.sidebarBdr}`,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)",
+                zIndex: 100, overflow: "hidden", padding: 4,
+              }}>
+                {workspaces.map((wk, index) => (
+                  <button
+                    key={wk.id || `ws-${index}`}
+                    onClick={() => { onSelectWs(wk.id); setWsOpen(false); }}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", gap: 8,
+                      padding: "7px 8px", borderRadius: 4, border: "none",
+                      background: wk.id === activeWs ? T.sidebarSel : "transparent",
+                      cursor: "pointer", textAlign: "left", transition: "background 0.08s",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = T.sidebarHov}
+                    onMouseLeave={e => e.currentTarget.style.background = wk.id === activeWs ? T.sidebarSel : "transparent"}
+                  >
+                    {/* Logo dans le dropdown — 32×32 */}
+                    <div style={{
+                      width: 32, height: 32, borderRadius: 6,
+                      border: "1px solid #e3e3e2", background: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      flexShrink: 0, overflow: "hidden",
+                    }}>
+                      {wk.logoUrl
+                        ? <img
+                            src={`${API_BASE.replace("/api", "")}${wk.logoUrl}`}
+                            alt=""
+                            style={{ width: "100%", height: "100%", objectFit: "contain", padding: 3, boxSizing: "border-box" }}
+                          />
+                        : <Building2 style={{ width: 14, height: 14, color: T.sidebarSub }} />
+                      }
                     </div>
-                  </div>
-                </div>
-                {/* Bouton Mon Profil */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 12, fontWeight: 600, color: T.sidebarText,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {wk.company}
+                      </div>
+                      <div style={{ fontSize: 10, color: T.sidebarSub }}>{fmtRangeShort(wk)}</div>
+                    </div>
+                    {wk.id === activeWs && <Check style={{ width: 12, height: 12, color: T.sidebarSub, flexShrink: 0 }} />}
+                  </button>
+                ))}
+ 
+                <div style={{ height: 1, background: T.sidebarBdr, margin: "4px 0" }} />
+ 
                 <button
-                  onClick={() => { setUserMenuOpen(false); onSection("profile"); }}
-                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 5, border: "none", background: "transparent", cursor: "pointer", color: T.sidebarText, fontSize: 13, fontWeight: 500, transition: "background 0.08s", marginBottom: 2 }}
+                  onClick={() => { onCreateWs(); setWsOpen(false); }}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 8,
+                    padding: "6px 8px", borderRadius: 4, border: "none",
+                    background: "transparent", cursor: "pointer", transition: "background 0.08s",
+                  }}
                   onMouseEnter={e => e.currentTarget.style.background = T.sidebarHov}
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                 >
-                  <UserCog style={{ width: 14, height: 14 }} />
-                  Mon Profil
-                </button>
-                {/* Bouton Déconnexion */}
-                <button
-                  onClick={() => { setUserMenuOpen(false); onLogout && onLogout(); }}
-                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 5, border: "none", background: "transparent", cursor: "pointer", color: "#d44c47", fontSize: 13, fontWeight: 500, transition: "background 0.08s" }}
-                  onMouseEnter={e => e.currentTarget.style.background = "rgba(212,76,71,0.07)"}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
-                    <polyline points="16 17 21 12 16 7"/>
-                    <line x1="21" y1="12" x2="9" y2="12"/>
-                  </svg>
-                  Se déconnecter
+                  <Plus style={{ width: 14, height: 14, color: T.sidebarSub }} />
+                  <span style={{ fontSize: 12, color: T.sidebarSub }}>Ajouter un workspace</span>
                 </button>
               </div>
             )}
           </div>
+ 
+          {/* ── Navigation ── */}
+          <nav style={{ flex: 1, padding: "2px 8px", overflowY: "auto" }}>
+            {NAV.map(item => {
+              const active = section === item.key;
+              const Icon = item.Icon;
+              return si(active, () => handleSection(item.key),
+                <>
+                  <Icon style={{
+                    width: 15, height: 15, flexShrink: 0,
+                    color: active ? T.sidebarText : T.sidebarSub,
+                    strokeWidth: active ? 2.2 : 1.8,
+                  }} />
+                  <span style={{
+                    fontSize: 14,
+                    fontWeight: active ? 600 : 400,
+                    color: active ? T.sidebarText : T.sidebarSub,
+                    letterSpacing: "-0.003em",
+                  }}>
+                    {item.label}
+                  </span>
+                </>
+              );
+            })}
+          </nav>
+ 
+          {/* ── Footer ── */}
+          <div style={{ borderTop: `1px solid ${T.sidebarBdr}` }}>
+ 
+            {/* Indicateur API */}
+            <div style={{ padding: "5px 16px", display: "flex", alignItems: "center", gap: 5 }}>
+              <div style={{
+                width: 6, height: 6, borderRadius: "50%",
+                background: apiOnline ? "#448361" : "#d44c47",
+                flexShrink: 0, transition: "background 0.3s",
+              }} />
+              <span style={{ fontSize: 10, color: T.sidebarSub }}>
+                {apiOnline ? "API connectée" : "Hors ligne"}
+              </span>
+            </div>
+ 
+            {/* Profil utilisateur */}
+            <div ref={userMenuRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setUserMenuOpen(v => !v)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 9,
+                  padding: "8px 12px 10px", border: "none",
+                  background: userMenuOpen ? T.sidebarHov : "transparent",
+                  cursor: "pointer", textAlign: "left", transition: "background 0.08s",
+                }}
+                onMouseEnter={e => { if (!userMenuOpen) e.currentTarget.style.background = T.sidebarHov; }}
+                onMouseLeave={e => { if (!userMenuOpen) e.currentTarget.style.background = "transparent"; }}
+              >
+                {/* Avatar */}
+                <div style={{
+                  width: 28, height: 28, borderRadius: "50%",
+                  background: "rgba(55,53,47,0.1)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0, fontSize: 11, fontWeight: 600,
+                  color: "#37352f", letterSpacing: "0.01em",
+                }}>
+                  {initials}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 13, fontWeight: 600, color: T.sidebarText,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {displayName}
+                  </div>
+                  <div style={{ fontSize: 10, color: T.sidebarSub }}>{roleLabel}</div>
+                </div>
+                <ChevronDown style={{
+                  width: 12, height: 12, color: T.sidebarSub, flexShrink: 0,
+                  transform: userMenuOpen ? "rotate(180deg)" : "none",
+                  transition: "transform 0.15s",
+                }} />
+              </button>
+ 
+              {/* Menu déroulant profil */}
+              {userMenuOpen && (
+                <div style={{
+                  position: "absolute", bottom: "calc(100% + 4px)", left: 8, right: 8,
+                  background: "#fff", borderRadius: 8,
+                  border: `1px solid ${T.sidebarBdr}`,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)",
+                  zIndex: 200, overflow: "hidden", padding: 6,
+                }}>
+                  {/* En-tête profil */}
+                  <div style={{ padding: "8px 10px 10px", borderBottom: `1px solid ${T.sidebarBdr}`, marginBottom: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{
+                        width: 32, height: 32, borderRadius: "50%",
+                        background: "rgba(55,53,47,0.1)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#37352f",
+                      }}>
+                        {initials}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: T.sidebarText }}>{displayName}</div>
+                        <div style={{ fontSize: 11, color: T.sidebarSub }}>@{currentUser?.username}</div>
+                      </div>
+                    </div>
+                  </div>
+ 
+                  {/* Mon profil */}
+                  <button
+                    onClick={() => { setUserMenuOpen(false); onSection("profile"); }}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", gap: 8,
+                      padding: "7px 10px", borderRadius: 5, border: "none",
+                      background: "transparent", cursor: "pointer",
+                      color: T.sidebarText, fontSize: 13, fontWeight: 500,
+                      transition: "background 0.08s", marginBottom: 2,
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = T.sidebarHov}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                  >
+                    <UserCog style={{ width: 14, height: 14 }} />
+                    Mon Profil
+                  </button>
+ 
+                  {/* Déconnexion */}
+                  <button
+                    onClick={() => { setUserMenuOpen(false); onLogout?.(); }}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", gap: 8,
+                      padding: "7px 10px", borderRadius: 5, border: "none",
+                      background: "transparent", cursor: "pointer",
+                      color: "#d44c47", fontSize: 13, fontWeight: 500,
+                      transition: "background 0.08s",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = "rgba(212,76,71,0.07)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                      <polyline points="16 17 21 12 16 7" />
+                      <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                    Se déconnecter
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+ 
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }
 
@@ -1078,286 +1356,193 @@ headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` }
 }
 
 function Overview({ ws, tasks, candidats, documents, onSection, loading, onDeleteWs, onUpdateWs }) {
+  const { w } = useWindowSize();
+  const isMobile = w < 640;
+  const isTablet  = w >= 640 && w < 1024;
+
   const [showExportConfirm, setShowExportConfirm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting]           = useState(false);
-  const [editing, setEditing]             = useState(false);
+  const [editing,  setEditing]            = useState(false);
   const [editForm, setEditForm]           = useState({ company: "", startDate: "", endDate: "" });
-  const [saving, setSaving]               = useState(false);
+  const [saving,   setSaving]             = useState(false);
 
-  // ── Export modal ─────────────────────────────────────────────
-  const [showExport, setShowExport]       = useState(false);
-  const [exportBase, setExportBase]       = useState(null);   // { exportedAt, rows }
-  const [allCols, setAllCols]             = useState([]);      // toutes les colonnes disponibles
-  const [selectedCols, setSelectedCols]   = useState([]);      // colonnes cochées, dans l'ordre voulu
-  const [dragIdx, setDragIdx]             = useState(null);
-  const [exporting, setExporting]         = useState(false);
+  const [showExport,    setShowExport]    = useState(false);
+  const [exportBase,    setExportBase]    = useState(null);
+  const [allCols,       setAllCols]       = useState([]);
+  const [selectedCols,  setSelectedCols]  = useState([]);
+  const [dragIdx,       setDragIdx]       = useState(null);
+  const [exporting,     setExporting]     = useState(false);
 
   const logoInputRef = useRef(null);
 
-const handleLogoUpload = async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  const fd = new FormData();
-  fd.append("logo", file);
-  const res = await fetch(`${API_BASE}/workspaces/${ws.id}/logo`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` },
-    body: fd,
-  });
-  const data = await res.json();
-  if (data.success) onUpdateWs(data.data);
-};
-
-const handleLogoDelete = async () => {
-  const res = await fetch(`${API_BASE}/workspaces/${ws.id}/logo`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` },
-  });
-  const data = await res.json();
-  if (data.success) onUpdateWs(data.data);
-};
-
-  // Colonnes "connues" avec label lisible
-  const KNOWN_LABELS = {
-  nom: "Nom", prenom: "Prénom", matricule: "Matricule",
-  theme: "Formation", groupe: "Groupe", heures: "Heures",
-  jours: "Jours",
-  halfDay: "Demi-journée",       // ← AJOUTÉ
-  slot:    "Créneau",            // ← AJOUTÉ (matin / après-midi)
-  dateDebut: "Date début", dateFin: "Date fin",
-  statut: "Statut", departement: "Département", csp: "CSP",
-  domaine: "Domaine", objectif: "Objectif", contenu: "Contenu",
-  niveau: "Niveau", publicCible: "Public cible",
-  typeFormation: "Type formation", cabinet: "Cabinet",
-  formateur: "Formateur", lieu: "Lieu", cout: "Coût",
-  cnss: "N° CNSS", contact: "Contact", nbrEspace: "Capacité",
-  cout_calcule: "Coût Calculé (Total/Pers)",
-  mois_planif: "Mois de planification"
-};
-
-const handleSafeCloseExport = () => {
-  // On demande confirmation si l'utilisateur a sélectionné des colonnes
-  if (selectedCols.length > 0) {
-    setShowExportConfirm(true);
-  } else {
-    setShowExport(false);
-  }
-};
-
-const saveColumnOrder = async (cols) => {
-  if (!ws?.id) return;
-  try {
-    await apiFetch(`/workspaces/${ws.id}/export-base`, {
-      method: "PATCH",
-      body: { exportBase: { columnOrder: cols } }
+  // ── Logo upload / delete ──────────────────────────────────────
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("logo", file);
+    const res = await fetch(`${API_BASE}/workspaces/${ws.id}/logo`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` },
+      body: fd,
     });
-  } catch (e) {
-    console.error("Erreur sauvegarde ordre:", e);
-  }
-};
+    const data = await res.json();
+    if (data.success) onUpdateWs(data.data);
+  };
+
+  const handleLogoDelete = async () => {
+    const res = await fetch(`${API_BASE}/workspaces/${ws.id}/logo`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` },
+    });
+    const data = await res.json();
+    if (data.success) onUpdateWs(data.data);
+  };
+
+  // ── Colonnes export ───────────────────────────────────────────
+  const KNOWN_LABELS = {
+    nom: "Nom", prenom: "Prénom", matricule: "Matricule",
+    theme: "Formation", groupe: "Groupe", heures: "Heures", jours: "Jours",
+    halfDay: "Demi-journée", slot: "Créneau",
+    dateDebut: "Date début", dateFin: "Date fin",
+    statut: "Statut", departement: "Département", csp: "CSP",
+    domaine: "Domaine", objectif: "Objectif", contenu: "Contenu",
+    niveau: "Niveau", publicCible: "Public cible",
+    typeFormation: "Type formation", cabinet: "Cabinet",
+    formateur: "Formateur", lieu: "Lieu", cout: "Coût",
+    cnss: "N° CNSS", contact: "Contact", nbrEspace: "Capacité",
+    cout_calcule: "Coût Calculé (Total/Pers)",
+    mois_planif: "Mois de planification",
+  };
+
+  const handleSafeCloseExport = () => {
+    if (selectedCols.length > 0) setShowExportConfirm(true);
+    else setShowExport(false);
+  };
+
+  const saveColumnOrder = async (cols) => {
+    if (!ws?.id) return;
+    try {
+      await apiFetch(`/workspaces/${ws.id}/export-base`, {
+        method: "PATCH",
+        body: { exportBase: { columnOrder: cols } },
+      });
+    } catch (e) { console.error("Erreur sauvegarde ordre:", e); }
+  };
 
   const openExport = async () => {
-  try {
-    const response = await apiFetch(`/workspaces/${ws?.id}/export-base`);
-    const data = response.data || response;
-
-    if (!data || !data.rows || data.rows.length === 0) {
-      alert("Données d'export indisponibles.");
-      return;
-    }
-
-    setExportBase(data);
-
-    // Initialisation des colonnes
-    const colSet = new Set();
-    data.rows.forEach(r => Object.keys(r).forEach(k => colSet.add(k)));
-    colSet.add("cout_calcule"); 
-    colSet.add("mois_planif");
-
-    const cols = Array.from(colSet).map(k => ({
-      key: k,
-      label: KNOWN_LABELS[k] || k,
-      known: !!KNOWN_LABELS[k],
-    }));
-    setAllCols(cols);
-
-    // Charger l'ordre depuis la DB ou défaut
-    if (data.columnOrder && data.columnOrder.length > 0) {
-      setSelectedCols(data.columnOrder.filter(k => colSet.has(k)));
-    } else {
-      const defaultOrder = ["nom","prenom","matricule","theme","groupe","heures","jours","dateDebut","dateFin","statut"];
-      setSelectedCols(defaultOrder.filter(k => colSet.has(k)));
-    }
-    
-    setShowExport(true);
-  } catch (err) {
-    alert("Erreur lors du chargement des données d'export.");
-  }
-};
+    try {
+      const response = await apiFetch(`/workspaces/${ws?.id}/export-base`);
+      const data = response.data || response;
+      if (!data || !data.rows || data.rows.length === 0) { alert("Données d'export indisponibles."); return; }
+      setExportBase(data);
+      const colSet = new Set();
+      data.rows.forEach(r => Object.keys(r).forEach(k => colSet.add(k)));
+      colSet.add("cout_calcule");
+      colSet.add("mois_planif");
+      const cols = Array.from(colSet).map(k => ({ key: k, label: KNOWN_LABELS[k] || k, known: !!KNOWN_LABELS[k] }));
+      setAllCols(cols);
+      if (data.columnOrder && data.columnOrder.length > 0) {
+        setSelectedCols(data.columnOrder.filter(k => colSet.has(k)));
+      } else {
+        const defaultOrder = ["nom","prenom","matricule","theme","groupe","heures","jours","dateDebut","dateFin","statut"];
+        setSelectedCols(defaultOrder.filter(k => colSet.has(k)));
+      }
+      setShowExport(true);
+    } catch (err) { alert("Erreur lors du chargement des données d'export."); }
+  };
 
   const toggleCol = (key) => {
-  setSelectedCols(prev => {
-    const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
-    saveColumnOrder(next); // Sauvegarde automatique
-    return next;
-  });
-};
+    setSelectedCols(prev => {
+      const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
+      saveColumnOrder(next);
+      return next;
+    });
+  };
 
-  // Drag-and-drop pour réordonner selectedCols
   const onDragStart = (e, idx) => { setDragIdx(idx); e.dataTransfer.effectAllowed = "move"; };
-  const onDragOver = (e, idx) => {
-  e.preventDefault();
-  if (dragIdx === null || dragIdx === idx) return;
-  setSelectedCols(prev => {
-    const next = [...prev];
-    const [moved] = next.splice(dragIdx, 1);
-    next.splice(idx, 0, moved);
-    saveColumnOrder(next); // Sauvegarde automatique de la nouvelle position
-    return next;
-  });
-  setDragIdx(idx);
-};
+  const onDragOver  = (e, idx) => {
+    e.preventDefault();
+    if (dragIdx === null || dragIdx === idx) return;
+    setSelectedCols(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(dragIdx, 1);
+      next.splice(idx, 0, moved);
+      saveColumnOrder(next);
+      return next;
+    });
+    setDragIdx(idx);
+  };
   const onDragEnd = () => setDragIdx(null);
 
   const doExport = async () => {
-  if (!exportBase || !selectedCols.length) return;
-  setExporting(true);
-  try {
-    const XLSX = await import("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs");
-
-    // 1. Calcul des effectifs par groupe pour la formule du coût
-    const groupCounts = {};
-    exportBase.rows.forEach(r => {
-      const key = `${r.theme}||${r.groupe}`;
-      groupCounts[key] = (groupCounts[key] || 0) + 1;
-    });
-
-    const numericCols = ["heures", "jours", "groupe", "cout", "nbrEspace", "cout_unitaire"];
-
-    // Helper : convertit "YYYY-MM-DD" en numéro de série Excel (entier pur = pas d'heure)
-    const dateToExcelSerial = (str) => {
-      const parts = str.split("-");
-      if (parts.length !== 3) return str;
-      const year = parseInt(parts[0]);
-      const month = parseInt(parts[1]) - 1;
-      const day = parseInt(parts[2]);
-      // Epoch Excel = 1er janvier 1900 (avec bug leap year 1900 inclus)
-      const utc = Date.UTC(year, month, day);
-      const excelEpoch = Date.UTC(1899, 11, 30); // 30 déc 1899
-      return Math.round((utc - excelEpoch) / 86400000); // entier = date pure sans heure
-    };
-
-    // 2. Préparation des en-têtes
-    const headers = selectedCols.map(k => {
-      const col = allCols.find(c => c.key === k);
-      return col ? col.label : (KNOWN_LABELS[k] || k);
-    });
-
-    // 3. Transformation des données pour Excel
-    const rows = exportBase.rows.map(r =>
-      selectedCols.map(k => {
+    if (!exportBase || !selectedCols.length) return;
+    setExporting(true);
+    try {
+      const XLSX = await import("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs");
+      const groupCounts = {};
+      exportBase.rows.forEach(r => {
+        const key = `${r.theme}||${r.groupe}`;
+        groupCounts[key] = (groupCounts[key] || 0) + 1;
+      });
+      const numericCols = ["heures","jours","groupe","cout","nbrEspace","cout_unitaire"];
+      const dateToExcelSerial = (str) => {
+        const parts = str.split("-");
+        if (parts.length !== 3) return str;
+        const utc = Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        return Math.round((utc - Date.UTC(1899, 11, 30)) / 86400000);
+      };
+      const headers = selectedCols.map(k => { const col = allCols.find(c => c.key === k); return col ? col.label : (KNOWN_LABELS[k] || k); });
+      const rows = exportBase.rows.map(r => selectedCols.map(k => {
         let value = r[k];
-
-        // --- MOIS DE PLANIFICATION ---
-        if (k === "mois_planif") {
-          if (!r.dateDebut) return "Non planifié";
-          const parts = r.dateDebut.split("-");
-          if (parts.length !== 3) return "Date invalide";
-          return MFR[parseInt(parts[1]) - 1];
-        }
-
-        // --- COUT CALCULÉ ---
-        if (k === "cout_calcule") {
-  const coutBase = parseFloat(String(r.cout || "0").replace(/\s/g, '').replace(',', '.')) || 0;
-  const jours    = parseFloat(r.jours) || 0;
-  const effectif = groupCounts[`${r.theme}||${r.groupe}`] || 1;
-
-  return {
-    f: `${coutBase}*${jours}/${effectif}`,
-    t: 'n',
-    z: '#,##0.00'
-  };
-}
-
-if (k === "slot") {
-      return value && value !== "" ? value : "Journée entière";
-    }
-
-        // --- DATES → numéro de série Excel entier (aucune heure) ---
-        if ((k === "dateDebut" || k === "dateFin") && value) {
-          return dateToExcelSerial(value);
-        }
-
-        // --- NOMBRES ---
-        if (numericCols.includes(k)) {
-          if (value === undefined || value === null || value === "") return 0;
-          const num = parseFloat(String(value).replace(/\s/g, '').replace(',', '.'));
-          return isNaN(num) ? 0 : num;
-        }
-
-        // TEXTE STANDARD
+        if (k === "mois_planif") { if (!r.dateDebut) return "Non planifié"; const p = r.dateDebut.split("-"); return p.length !== 3 ? "Date invalide" : MFR[parseInt(p[1]) - 1]; }
+        if (k === "cout_calcule") { const cB = parseFloat(String(r.cout||"0").replace(/\s/g,"").replace(",","."))||0; const j = parseFloat(r.jours)||0; const ef = groupCounts[`${r.theme}||${r.groupe}`]||1; return { f:`${cB}*${j}/${ef}`, t:"n", z:"#,##0.00" }; }
+        if (k === "slot") return value && value !== "" ? value : "Journée entière";
+        if ((k === "dateDebut" || k === "dateFin") && value) return dateToExcelSerial(value);
+        if (numericCols.includes(k)) { if (value === undefined || value === null || value === "") return 0; const num = parseFloat(String(value).replace(/\s/g,"").replace(",",".")); return isNaN(num) ? 0 : num; }
         return value === undefined || value === null ? "" : value;
-      })
-    );
-
-    // 4. Création de la feuille (sans cellDates, on gère manuellement)
-    const wsXlsx = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-
-    // 5. Forcer le format date sur les colonnes dateDebut / dateFin
-    selectedCols.forEach((colKey, index) => {
-      const colLetter = XLSX.utils.encode_col(index);
-      for (let i = 1; i <= rows.length; i++) {
-        const cellRef = colLetter + (i + 1);
-        if (!wsXlsx[cellRef]) continue;
-
-        if (colKey === "dateDebut" || colKey === "dateFin") {
-          wsXlsx[cellRef].t = 'n';          // type numérique
-          wsXlsx[cellRef].z = 'dd/mm/yyyy'; // format date court français
+      }));
+      const wsXlsx = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      selectedCols.forEach((colKey, index) => {
+        const colLetter = XLSX.utils.encode_col(index);
+        for (let i = 1; i <= rows.length; i++) {
+          const cellRef = colLetter + (i + 1);
+          if (!wsXlsx[cellRef]) continue;
+          if (colKey === "dateDebut" || colKey === "dateFin") { wsXlsx[cellRef].t = "n"; wsXlsx[cellRef].z = "dd/mm/yyyy"; }
+          if (colKey === "cout") wsXlsx[cellRef].z = "#,##0.00";
+          if (colKey === "cout_calcule" && !wsXlsx[cellRef].f) wsXlsx[cellRef].z = "#,##0.00";
         }
+      });
+      wsXlsx["!cols"] = headers.map(() => ({ wch: 20 }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, wsXlsx, "Base fusionnée");
+      XLSX.writeFile(wb, `export_${ws.company.replace(/\s+/g,"_")}_${new Date().toISOString().slice(0,10)}.xlsx`);
+    } catch (e) { console.error("Erreur Export:", e); alert("Erreur lors de l'export Excel."); }
+    setExporting(false);
+  };
 
-        if (colKey === "cout") {
-  wsXlsx[cellRef].z = '#,##0.00';
-}
-if (colKey === "cout_calcule" && !wsXlsx[cellRef].f) {
-  wsXlsx[cellRef].z = '#,##0.00';
-}
-      }
-    });
+  // ── Styles inputs ─────────────────────────────────────────────
+  const iS = { boxSizing:"border-box", padding:"7px 10px", borderRadius:4, border:`1px solid rgba(55,53,47,0.2)`, fontSize:13, color:T.pageText, outline:"none", fontFamily:"inherit", background:"#fff", transition:"border-color 0.12s,box-shadow 0.12s" };
+  const fI  = e => { e.target.style.borderColor = T.accent; e.target.style.boxShadow = `0 0 0 2px ${T.accent}22`; };
+  const fO  = e => { e.target.style.borderColor = "rgba(55,53,47,0.2)"; e.target.style.boxShadow = "none"; };
 
-    // 6. Largeur des colonnes
-    wsXlsx["!cols"] = headers.map(() => ({ wch: 20 }));
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, wsXlsx, "Base fusionnée");
-    XLSX.writeFile(wb, `export_${ws.company.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-
-  } catch (e) {
-    console.error("Erreur Export:", e);
-    alert("Erreur lors de l'export Excel.");
-  }
-  setExporting(false);
-};
-
-  // ── Styles ───────────────────────────────────────────────────
-  const iS = { boxSizing: "border-box", padding: "7px 10px", borderRadius: 4, border: `1px solid rgba(55,53,47,0.2)`, fontSize: 13, color: T.pageText, outline: "none", fontFamily: "inherit", background: "#fff", transition: "border-color 0.12s,box-shadow 0.12s" };
-  const fI = e => { e.target.style.borderColor = T.accent; e.target.style.boxShadow = `0 0 0 2px ${T.accent}22`; };
-  const fO = e => { e.target.style.borderColor = "rgba(55,53,47,0.2)"; e.target.style.boxShadow = "none"; };
-
+  // ── Guards ────────────────────────────────────────────────────
   if (!ws) return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", gap: 8 }}>
-      <Building2 style={{ width: 40, height: 40, color: T.pageTer, strokeWidth: 1.4 }} />
-      <div style={{ fontSize: 16, fontWeight: 600, color: T.pageText }}>Sélectionnez un workspace</div>
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"60vh", gap:8 }}>
+      <Building2 style={{ width:40, height:40, color:T.pageTer, strokeWidth:1.4 }} />
+      <div style={{ fontSize:16, fontWeight:600, color:T.pageText }}>Sélectionnez un workspace</div>
     </div>
   );
   if (loading) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", gap: 10 }}>
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"60vh", gap:10 }}>
       <Spinner size={20} color={T.accent} />
-      <span style={{ fontSize: 14, color: T.pageSub }}>Chargement…</span>
+      <span style={{ fontSize:14, color:T.pageSub }}>Chargement…</span>
     </div>
   );
 
-  const done   = tasks.filter(t => { const now = new Date(); now.setHours(0,0,0,0); return pd(t.end) < now; }).length;
+  // ── Calculs ───────────────────────────────────────────────────
+  const done      = tasks.filter(t => { const now = new Date(); now.setHours(0,0,0,0); return pd(t.end) < now; }).length;
   const retained  = candidats.filter(c => c.statut === "Retenu").length;
   const validated = documents.filter(d => d.statut === "Validé").length;
   const uniqueCandidatsCount = (() => {
@@ -1369,78 +1554,66 @@ if (colKey === "cout_calcule" && !wsXlsx[cellRef].f) {
     });
     return seen.size;
   })();
-  const divider = <div style={{ height: 1, background: T.pageBdr, margin: "32px 0" }} />;
+
+  const divider = <div style={{ height:1, background:T.pageBdr, margin:"28px 0" }} />;
   const dur = editForm.startDate && editForm.endDate && editForm.startDate <= editForm.endDate
     ? gdb(pd(editForm.startDate), pd(editForm.endDate)) + 1 : null;
 
   const handleDelete = async () => { setDeleting(true); await onDeleteWs(ws.id); setDeleting(false); setConfirmDelete(false); };
-  const startEdit = () => { setEditForm({ company: ws.company||"", startDate: ws.startDate||"", endDate: ws.endDate||"" }); setEditing(true); };
-  // Dans Overview
-const saveEdit = async () => {
-  if (!editForm.company.trim() || saving) return;
-  setSaving(true);
-  try {
-    const response = await apiFetch(`/workspaces/${ws.id}`, { 
-      method: "PUT", 
-      body: { 
-        company: editForm.company.trim(), 
-        startDate: editForm.startDate, 
-        endDate: editForm.endDate 
-      } 
-    });
+  const startEdit   = () => { setEditForm({ company: ws.company||"", startDate: ws.startDate||"", endDate: ws.endDate||"" }); setEditing(true); };
+  const saveEdit    = async () => {
+    if (!editForm.company.trim() || saving) return;
+    setSaving(true);
+    try {
+      const response = await apiFetch(`/workspaces/${ws.id}`, { method:"PUT", body:{ company:editForm.company.trim(), startDate:editForm.startDate, endDate:editForm.endDate } });
+      onUpdateWs(response.data || response);
+      setEditing(false);
+    } catch (err) { console.error("Erreur saveEdit:", err); }
+    setSaving(false);
+  };
 
-    // ÉTAPE CRUCIALE : On extrait les données et on normalise
-    const updatedData = response.data || response;
-    
-    // On appelle la fonction du parent
-    onUpdateWs(updatedData); 
-    
-    setEditing(false);
-  } catch (err) {
-    console.error("Erreur saveEdit:", err);
-    showToast("Erreur lors de la modification");
-  }
-  setSaving(false);
-};
+  const COL_GROUPS_EXPORT = [
+    { label:"Identité",   keys:["nom","prenom","matricule","departement","csp"] },
+    { label:"Formation",  keys:["theme","groupe","heures","jours","halfDay","slot","dateDebut","dateFin","statut","domaine","objectif","contenu","niveau","publicCible","typeFormation","mois_planif"] },
+    { label:"Cabinet",    keys:["cabinet","formateur","lieu","cout","cout_calcule","cnss","contact","nbrEspace"] },
+  ];
+  const knownKeys = new Set(Object.keys(KNOWN_LABELS));
+  const extraCols = allCols.filter(c => !knownKeys.has(c.key));
 
-  // ── Groupes de colonnes pour le picker ───────────────────────
-  // COL_GROUPS_EXPORT — ajouter halfDay et slot dans le groupe Formation
-const COL_GROUPS_EXPORT = [
-  { label: "Identité",  keys: ["nom","prenom","matricule","departement","csp"] },
-  { label: "Formation", keys: [
-      "theme","groupe","heures","jours",
-      "halfDay","slot",                    // ← AJOUTÉ
-      "dateDebut","dateFin","statut",
-      "domaine","objectif","contenu","niveau","publicCible","typeFormation",
-      "dateDebut","dateFin","mois_planif", 
-    ]
-  },
-{ label: "Cabinet", keys: ["cabinet", "formateur", "lieu", "cout", "cout_calcule", "cnss", "contact", "nbrEspace"] },
-];
-  // Colonnes supplémentaires non-mappées (dynamiques depuis Excel)
-  const knownKeys  = new Set(Object.keys(KNOWN_LABELS));
-  const extraCols  = allCols.filter(c => !knownKeys.has(c.key));
+  // ── Padding responsive ────────────────────────────────────────
+  const pagePadding = isMobile ? "16px 16px 60px" : isTablet ? "24px 32px 60px" : "40px 96px 80px";
 
   return (
-    <div style={{ padding: "40px 96px 80px", maxWidth: 900 }}>
+    <div style={{ padding: pagePadding, maxWidth: 900 }}>
 
-      {/* ── Modal suppression ── */}
+      {/* ══════════════════════════════════════════════════════════
+          MODAL SUPPRESSION
+      ══════════════════════════════════════════════════════════ */}
       {confirmDelete && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+        <div style={{ position:"fixed", inset:0, zIndex:500, background:"rgba(0,0,0,0.35)", display:"flex", alignItems:"center", justifyContent:"center" }}
           onMouseDown={e => { if (e.target === e.currentTarget) setConfirmDelete(false); }}>
-          <div style={{ background: "#fff", borderRadius: 8, boxShadow: "0 16px 48px rgba(0,0,0,0.18)", width: "min(420px,95vw)", border: `1px solid rgba(55,53,47,0.13)`, overflow: "hidden" }}>
-            <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${T.pageBdr}`, display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(212,76,71,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Trash2 style={{ width: 16, height: 16, color: "#d44c47" }} /></div>
-              <span style={{ fontSize: 16, fontWeight: 700, color: T.pageText, letterSpacing: "-0.02em" }}>Supprimer le workspace</span>
-              <button onClick={() => setConfirmDelete(false)} style={{ marginLeft: "auto", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", color: T.pageSub }}><X style={{ width: 14, height: 14 }} /></button>
+          <div style={{ background:"#fff", borderRadius:8, boxShadow:"0 16px 48px rgba(0,0,0,0.18)", width:"min(420px,95vw)", border:`1px solid rgba(55,53,47,0.13)`, overflow:"hidden" }}>
+            <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${T.pageBdr}`, display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ width:32, height:32, borderRadius:8, background:"rgba(212,76,71,0.1)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                <Trash2 style={{ width:16, height:16, color:"#d44c47" }} />
+              </div>
+              <span style={{ fontSize:16, fontWeight:700, color:T.pageText, letterSpacing:"-0.02em" }}>Supprimer le workspace</span>
+              <button onClick={() => setConfirmDelete(false)} style={{ marginLeft:"auto", width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:4, border:"none", background:"transparent", cursor:"pointer", color:T.pageSub }}>
+                <X style={{ width:14, height:14 }} />
+              </button>
             </div>
-            <div style={{ padding: "20px 24px" }}>
-              <p style={{ fontSize: 14, color: T.pageText, margin: "0 0 8px", lineHeight: 1.6 }}>Vous êtes sur le point de supprimer <strong>"{ws.company}"</strong>.</p>
-              <p style={{ fontSize: 13, color: T.pageSub, margin: "0 0 20px", lineHeight: 1.6 }}>Cette action supprimera définitivement <strong>{tasks.length} tâche{tasks.length!==1?"s":""}</strong>, <strong>{uniqueCandidatsCount} candidat{uniqueCandidatsCount!==1?"s":""}</strong> et <strong>{documents.length} document{documents.length!==1?"s":""}</strong>. Elle est irréversible.</p>
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button onClick={() => setConfirmDelete(false)} style={{ padding: "7px 16px", fontSize: 13, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Annuler</button>
-                <button onClick={handleDelete} disabled={deleting} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", fontSize: 13, fontWeight: 600, color: "#fff", background: "#d44c47", border: "none", borderRadius: 4, cursor: deleting ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: deleting ? 0.7 : 1 }}>
-                  {deleting ? <Spinner size={13} color="#fff" /> : <Trash2 style={{ width: 13, height: 13 }} />}{deleting ? "Suppression…" : "Supprimer définitivement"}
+            <div style={{ padding:"20px 24px" }}>
+              <p style={{ fontSize:14, color:T.pageText, margin:"0 0 8px", lineHeight:1.6 }}>
+                Vous êtes sur le point de supprimer <strong>"{ws.company}"</strong>.
+              </p>
+              <p style={{ fontSize:13, color:T.pageSub, margin:"0 0 20px", lineHeight:1.6 }}>
+                Cette action supprimera définitivement <strong>{tasks.length} tâche{tasks.length!==1?"s":""}</strong>, <strong>{uniqueCandidatsCount} candidat{uniqueCandidatsCount!==1?"s":""}</strong> et <strong>{documents.length} document{documents.length!==1?"s":""}</strong>. Elle est irréversible.
+              </p>
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+                <button onClick={() => setConfirmDelete(false)} style={{ padding:"7px 16px", fontSize:13, color:T.pageSub, background:"transparent", border:`1px solid rgba(55,53,47,0.2)`, borderRadius:6, cursor:"pointer", fontFamily:"inherit" }}>Annuler</button>
+                <button onClick={handleDelete} disabled={deleting} style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 16px", fontSize:13, fontWeight:600, color:"#fff", background:"#d44c47", border:"none", borderRadius:6, cursor:deleting?"not-allowed":"pointer", fontFamily:"inherit", opacity:deleting?0.7:1 }}>
+                  {deleting ? <Spinner size={13} color="#fff" /> : <Trash2 style={{ width:13, height:13 }} />}
+                  {deleting ? "Suppression…" : "Supprimer définitivement"}
                 </button>
               </div>
             </div>
@@ -1452,84 +1625,62 @@ const COL_GROUPS_EXPORT = [
           MODAL EXPORT EXCEL
       ══════════════════════════════════════════════════════════ */}
       {showExport && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        <div style={{ position:"fixed", inset:0, zIndex:600, background:"rgba(0,0,0,0.4)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
           onMouseDown={e => { if (e.target === e.currentTarget) handleSafeCloseExport(); }}>
-            {showExportConfirm && (
-      <ConfirmModal 
-        title="Fermer l'exportateur ?"
-        message="Vos réglages de colonnes et l'ordre choisi ne seront pas appliqués si vous quittez maintenant."
-        confirmLabel="Fermer l'export"
-        cancelLabel="Continuer"
-        onConfirm={() => {
-          setShowExportConfirm(false);
-          setShowExport(false);
-        }}
-        onCancel={() => setShowExportConfirm(false)}
-      />
-    )}
-          <div style={{ background: "#fff", borderRadius: 8,   width: "min(1200px, 98vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", border: `1px solid rgba(55,53,47,0.12)` }}>
-
-            {/* Header */}
-            <div style={{ padding: "16px 22px 14px", borderBottom: `1px solid ${T.pageBdr}`, display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-              <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(68,131,97,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <FileUp style={{ width: 16, height: 16, color: "#448361" }} />
+          {showExportConfirm && (
+            <ConfirmModal
+              title="Fermer l'exportateur ?"
+              message="Vos réglages de colonnes et l'ordre choisi ne seront pas appliqués si vous quittez maintenant."
+              confirmLabel="Fermer l'export"
+              cancelLabel="Continuer"
+              onConfirm={() => { setShowExportConfirm(false); setShowExport(false); }}
+              onCancel={() => setShowExportConfirm(false)}
+            />
+          )}
+          <div style={{ background:"#fff", borderRadius:8, width:"min(1200px,98vw)", maxHeight:"92vh", display:"flex", flexDirection:"column", boxShadow:"0 20px 60px rgba(0,0,0,0.18)", border:`1px solid rgba(55,53,47,0.12)` }}>
+            {/* Header export */}
+            <div style={{ padding:"16px 22px 14px", borderBottom:`1px solid ${T.pageBdr}`, display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
+              <div style={{ width:32, height:32, borderRadius:8, background:"rgba(68,131,97,0.1)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                <FileUp style={{ width:16, height:16, color:"#448361" }} />
               </div>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: T.pageText }}>Exporter la base fusionnée</div>
-                <div style={{ fontSize: 11, color: T.pageSub, marginTop: 1 }}>
+                <div style={{ fontSize:15, fontWeight:700, color:T.pageText }}>Exporter la base fusionnée</div>
+                <div style={{ fontSize:11, color:T.pageSub, marginTop:1 }}>
                   {exportBase?.rows?.length || 0} lignes · Importé le {exportBase?.exportedAt ? new Date(exportBase.exportedAt).toLocaleDateString("fr-FR") : "—"}
                 </div>
               </div>
-              <button onClick={handleSafeCloseExport} style={{ marginLeft: "auto", width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", color: T.pageSub }}>
-                <X style={{ width: 14, height: 14 }} />
+              <button onClick={handleSafeCloseExport} style={{ marginLeft:"auto", width:26, height:26, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:4, border:"none", background:"transparent", cursor:"pointer", color:T.pageSub }}>
+                <X style={{ width:14, height:14 }} />
               </button>
             </div>
-
-            {/* Body — deux colonnes */}
-            <div style={{ flex: 1, overflowY: "auto", display: "grid", gridTemplateColumns: "350px 1fr", gap: 0 }}>
-
+            {/* Body export */}
+            <div style={{ flex:1, overflowY:"auto", display:"grid", gridTemplateColumns: isMobile ? "1fr" : "350px 1fr", gap:0 }}>
               {/* Colonne gauche — picker */}
-              <div style={{ padding: "18px 20px", borderRight: `1px solid ${T.pageBdr}`, display: "flex", flexDirection: "column", gap: 14 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  Colonnes disponibles
+              <div style={{ padding:"18px 20px", borderRight: isMobile ? "none" : `1px solid ${T.pageBdr}`, borderBottom: isMobile ? `1px solid ${T.pageBdr}` : "none", display:"flex", flexDirection:"column", gap:14 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em" }}>Colonnes disponibles</div>
+                <div style={{ display:"flex", gap:6 }}>
+                  <button onClick={() => setSelectedCols(allCols.map(c => c.key))} style={{ flex:1, padding:"5px 0", fontSize:11, fontWeight:600, color:T.accent, background:`${T.accent}0d`, border:`1px solid ${T.accent}30`, borderRadius:3, cursor:"pointer", fontFamily:"inherit" }}>Tout sélectionner</button>
+                  <button onClick={() => setSelectedCols([])} style={{ flex:1, padding:"5px 0", fontSize:11, color:T.pageSub, background:"transparent", border:`1px solid ${T.pageBdr}`, borderRadius:3, cursor:"pointer", fontFamily:"inherit" }}>Tout désélectionner</button>
                 </div>
-
-                {/* Actions rapides */}
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={() => setSelectedCols(allCols.map(c => c.key))}
-                    style={{ flex: 1, padding: "5px 0", fontSize: 11, fontWeight: 600, color: T.accent, background: `${T.accent}0d`, border: `1px solid ${T.accent}30`, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>
-                    Tout sélectionner
-                  </button>
-                  <button onClick={() => setSelectedCols([])}
-                    style={{ flex: 1, padding: "5px 0", fontSize: 11, color: T.pageSub, background: "transparent", border: `1px solid ${T.pageBdr}`, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>
-                    Tout désélectionner
-                  </button>
-                </div>
-
-                {/* Groupes de colonnes connues */}
                 {COL_GROUPS_EXPORT.map(grp => {
                   const grpCols = grp.keys.filter(k => allCols.find(c => c.key === k));
                   if (!grpCols.length) return null;
                   return (
                     <div key={grp.label}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5, paddingBottom: 4, borderBottom: `1px solid ${T.pageBdr}` }}>
-                        {grp.label}
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                      <div style={{ fontSize:10, fontWeight:700, color:T.pageTer, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:5, paddingBottom:4, borderBottom:`1px solid ${T.pageBdr}` }}>{grp.label}</div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
                         {grpCols.map(k => {
                           const col = allCols.find(c => c.key === k);
                           const on  = selectedCols.includes(k);
                           return (
                             <div key={k} onClick={() => toggleCol(k)}
-                              style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 4, cursor: "pointer", background: on ? `${T.accent}08` : "transparent", transition: "background 0.08s" }}
+                              style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderRadius:4, cursor:"pointer", background: on ? `${T.accent}08` : "transparent", transition:"background 0.08s" }}
                               onMouseEnter={e => { if (!on) e.currentTarget.style.background = "rgba(55,53,47,0.03)"; }}
                               onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
-                              <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${on ? T.accent : "rgba(55,53,47,0.25)"}`, background: on ? T.accent : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                {on && <Check style={{ width: 9, height: 9, color: "#fff" }} />}
+                              <div style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`1.5px solid ${on ? T.accent : "rgba(55,53,47,0.25)"}`, background: on ? T.accent : "#fff", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                                {on && <Check style={{ width:9, height:9, color:"#fff" }} />}
                               </div>
-                              <span style={{ fontSize: 12, color: on ? T.pageText : T.pageSub, fontWeight: on ? 500 : 400 }}>
-                                {col?.label || k}
-                              </span>
+                              <span style={{ fontSize:12, color: on ? T.pageText : T.pageSub, fontWeight: on ? 500 : 400 }}>{col?.label || k}</span>
                             </div>
                           );
                         })}
@@ -1537,28 +1688,22 @@ const COL_GROUPS_EXPORT = [
                     </div>
                   );
                 })}
-
-                {/* Colonnes supplémentaires (non-mappées depuis Excel) */}
                 {extraCols.length > 0 && (
                   <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#9065b0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5, paddingBottom: 4, borderBottom: `1px solid rgba(144,101,176,0.2)` }}>
-                      Colonnes Excel supplémentaires
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    <div style={{ fontSize:10, fontWeight:700, color:"#9065b0", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:5, paddingBottom:4, borderBottom:"1px solid rgba(144,101,176,0.2)" }}>Colonnes Excel supplémentaires</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
                       {extraCols.map(col => {
                         const on = selectedCols.includes(col.key);
                         return (
                           <div key={col.key} onClick={() => toggleCol(col.key)}
-                            style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 4, cursor: "pointer", background: on ? "rgba(144,101,176,0.08)" : "transparent" }}
+                            style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderRadius:4, cursor:"pointer", background: on ? "rgba(144,101,176,0.08)" : "transparent" }}
                             onMouseEnter={e => { if (!on) e.currentTarget.style.background = "rgba(144,101,176,0.04)"; }}
                             onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
-                            <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${on ? "#9065b0" : "rgba(144,101,176,0.3)"}`, background: on ? "#9065b0" : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              {on && <Check style={{ width: 9, height: 9, color: "#fff" }} />}
+                            <div style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`1.5px solid ${on ? "#9065b0" : "rgba(144,101,176,0.3)"}`, background: on ? "#9065b0" : "#fff", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                              {on && <Check style={{ width:9, height:9, color:"#fff" }} />}
                             </div>
-                            <span style={{ fontSize: 12, color: on ? T.pageText : T.pageSub, fontWeight: on ? 500 : 400 }}>
-                              {col.label}
-                            </span>
-                            <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 99, background: "rgba(144,101,176,0.1)", color: "#9065b0", marginLeft: "auto", flexShrink: 0 }}>Excel</span>
+                            <span style={{ fontSize:12, color: on ? T.pageText : T.pageSub, fontWeight: on ? 500 : 400 }}>{col.label}</span>
+                            <span style={{ fontSize:9, padding:"1px 5px", borderRadius:99, background:"rgba(144,101,176,0.1)", color:"#9065b0", marginLeft:"auto", flexShrink:0 }}>Excel</span>
                           </div>
                         );
                       })}
@@ -1566,208 +1711,78 @@ const COL_GROUPS_EXPORT = [
                   </div>
                 )}
               </div>
-
               {/* Colonne droite — ordre + aperçu */}
-              <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                    Ordre des colonnes
-                  </div>
-                  <span style={{ fontSize: 11, color: T.pageTer }}>
-                    {selectedCols.length} colonne{selectedCols.length !== 1 ? "s" : ""} sélectionnée{selectedCols.length !== 1 ? "s" : ""}
-                  </span>
+              <div style={{ padding:"18px 20px", display:"flex", flexDirection:"column", gap:14 }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em" }}>Ordre des colonnes</div>
+                  <span style={{ fontSize:11, color:T.pageTer }}>{selectedCols.length} colonne{selectedCols.length !== 1 ? "s" : ""} sélectionnée{selectedCols.length !== 1 ? "s" : ""}</span>
                 </div>
-                <button 
-  // Dans le bouton de reset de l'ordre :
-onClick={() => {
-  const defaultOrder = ["nom","prenom","matricule","theme","groupe","heures","jours","dateDebut","dateFin","statut"];
-  const filteredDefault = defaultOrder.filter(k => allCols.find(c => c.key === k));
-  setSelectedCols(filteredDefault);
-  saveColumnOrder(filteredDefault); // Sauvegarde le reset en DB
-}}
-  style={{ fontSize: '10px', color: T.accent, background: 'none', border: 'none', cursor: 'pointer' }}
->
-  Rétablir l'ordre par défaut
-</button>
-
+                <button onClick={() => { const d = ["nom","prenom","matricule","theme","groupe","heures","jours","dateDebut","dateFin","statut"].filter(k => allCols.find(c => c.key === k)); setSelectedCols(d); saveColumnOrder(d); }} style={{ fontSize:10, color:T.accent, background:"none", border:"none", cursor:"pointer", textAlign:"left" }}>Rétablir l'ordre par défaut</button>
                 {selectedCols.length === 0 ? (
-                  <div style={{ padding: "24px 16px", textAlign: "center", color: T.pageTer, fontSize: 12, fontStyle: "italic", border: `1px dashed ${T.pageBdr}`, borderRadius: 6 }}>
-                    Sélectionnez des colonnes à gauche
-                  </div>
+                  <div style={{ padding:"24px 16px", textAlign:"center", color:T.pageTer, fontSize:12, fontStyle:"italic", border:`1px dashed ${T.pageBdr}`, borderRadius:6 }}>Sélectionnez des colonnes à gauche</div>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2, border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
+                  <div style={{ display:"flex", flexDirection:"column", gap:2, border:`1px solid ${T.pageBdr}`, borderRadius:6, overflow:"hidden" }}>
                     {selectedCols.map((k, idx) => {
                       const col = allCols.find(c => c.key === k);
                       const isExtra = !knownKeys.has(k);
                       return (
-                        <div key={k}
-                          draggable
-                          onDragStart={e => onDragStart(e, idx)}
-                          onDragOver={e => onDragOver(e, idx)}
-                          onDragEnd={onDragEnd}
-                          style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: dragIdx === idx ? `${T.accent}08` : idx % 2 === 0 ? "#fff" : "rgba(55,53,47,0.015)", cursor: "grab", borderBottom: idx < selectedCols.length - 1 ? `1px solid ${T.pageBdr}` : "none", transition: "background 0.08s" }}>
-                          {/* Grip */}
-                          <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0, opacity: 0.35 }}>
-                            <div style={{ width: 12, height: 1.5, background: T.pageText, borderRadius: 1 }} />
-                            <div style={{ width: 12, height: 1.5, background: T.pageText, borderRadius: 1 }} />
-                            <div style={{ width: 12, height: 1.5, background: T.pageText, borderRadius: 1 }} />
+                        <div key={k} draggable onDragStart={e => onDragStart(e, idx)} onDragOver={e => onDragOver(e, idx)} onDragEnd={onDragEnd}
+                          style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 10px", background: dragIdx === idx ? `${T.accent}08` : idx % 2 === 0 ? "#fff" : "rgba(55,53,47,0.015)", cursor:"grab", borderBottom: idx < selectedCols.length - 1 ? `1px solid ${T.pageBdr}` : "none", transition:"background 0.08s" }}>
+                          <div style={{ display:"flex", flexDirection:"column", gap:2, flexShrink:0, opacity:0.35 }}>
+                            {[0,1,2].map(i => <div key={i} style={{ width:12, height:1.5, background:T.pageText, borderRadius:1 }} />)}
                           </div>
-                          {/* Numéro */}
-                          <span style={{ fontSize: 10, fontFamily: "monospace", color: T.pageTer, width: 18, textAlign: "right", flexShrink: 0 }}>{idx + 1}</span>
-                          {/* Label */}
-                          <span style={{ flex: 1, fontSize: 12, color: T.pageText, fontWeight: 500 }}>{col?.label || k}</span>
-                          {/* Badge Excel */}
-                          {isExtra && (
-                            <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 99, background: "rgba(144,101,176,0.1)", color: "#9065b0", flexShrink: 0 }}>Excel</span>
-                          )}
-                          {/* Supprimer */}
-                          <button onClick={() => toggleCol(k)}
-                            style={{ width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", cursor: "pointer", color: T.pageTer, padding: 0, flexShrink: 0, borderRadius: 3 }}
-                            title="Retirer">
-                            <X style={{ width: 10, height: 10 }} />
+                          <span style={{ fontSize:10, fontFamily:"monospace", color:T.pageTer, width:18, textAlign:"right", flexShrink:0 }}>{idx + 1}</span>
+                          <span style={{ flex:1, fontSize:12, color:T.pageText, fontWeight:500 }}>{col?.label || k}</span>
+                          {isExtra && <span style={{ fontSize:9, padding:"1px 5px", borderRadius:99, background:"rgba(144,101,176,0.1)", color:"#9065b0", flexShrink:0 }}>Excel</span>}
+                          <button onClick={() => toggleCol(k)} style={{ width:18, height:18, display:"flex", alignItems:"center", justifyContent:"center", border:"none", background:"transparent", cursor:"pointer", color:T.pageTer, padding:0, flexShrink:0, borderRadius:3 }}>
+                            <X style={{ width:10, height:10 }} />
                           </button>
                         </div>
                       );
                     })}
                   </div>
                 )}
-
-                {/* Aperçu */}
-                {/* Aperçu (Tableau de preview corrigé) */}
-{selectedCols.length > 0 && exportBase?.rows?.length > 0 && (
-  <div style={{ marginTop: 10 }}>
-    <div style={{ fontSize: 11, fontWeight: 700, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-      Aperçu (3 premières lignes)
-    </div>
-    
-    {/* Conteneur de scroll pour gérer les nombreuses colonnes */}
-    <div style={{ 
-      overflowX: "auto", 
-      border: `1px solid ${T.pageBdr}`, 
-      borderRadius: 6,
-      background: "#fff" 
-    }}>
-      <table style={{ borderCollapse: "collapse", fontSize: 11, minWidth: "100%", tableLayout: "fixed" }}>
-        <thead>
-          <tr style={{ background: "rgba(55,53,47,0.04)" }}>
-            {selectedCols.map(k => {
-              const col = allCols.find(c => c.key === k);
-              return (
-                <th key={k} style={{ 
-                  padding: "8px 12px", 
-                  fontWeight: 600, 
-                  color: T.pageSub, 
-                  textAlign: "left", 
-                  whiteSpace: "nowrap", 
-                  borderBottom: `1px solid ${T.pageBdr}`, 
-                  borderRight: `1px solid ${T.pageBdr}50`,
-                  fontSize: 10, 
-                  textTransform: "uppercase", 
-                  width: 140 // Largeur fixe pour l'alignement
-                }}>
-                  {col?.label || k}
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {exportBase.rows.slice(0, 3).map((row, ri) => (
-            <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "rgba(55,53,47,0.015)" }}>
-              {selectedCols.map(k => {
-  let displayValue = row[k];
-  
-  // 1. LOGIQUE POUR LE MOIS DE PLANIFICATION
-  // 1. LOGIQUE POUR LE MOIS DE PLANIFICATION (MOIS SEUL)
-if (k === "mois_planif") {
-  if (!row.dateDebut) {
-    displayValue = <span style={{ color: T.pageTer }}>—</span>;
-  } else {
-    const d = new Date(row.dateDebut + "T00:00:00");
-    // On n'affiche que le nom du mois
-    displayValue = !isNaN(d.getTime()) ? MFR[d.getMonth()] : "Invalide";
-  }
-}
-
-  // 2. LOGIQUE POUR LE COUT CALCULÉ
-  else if (k === "cout_calcule") {
-    const groupKey = `${row.theme}||${row.groupe}`;
-    // On filtre les lignes pour trouver l'effectif réel de ce groupe
-    const groupRows = exportBase.rows.filter(r => `${r.theme}||${r.groupe}` === groupKey);
-    const coutBase = parseFloat(String(row.cout || "0").replace(/\s/g, '').replace(',', '.')) || 0;
-    const jours = parseFloat(row.jours) || 0;
-    const effectif = groupRows.length || 1;
-    const calcul = Math.round(((coutBase * jours) / effectif) * 100) / 100;
-    
-    displayValue = calcul.toLocaleString('fr-FR', { minimumFractionDigits: 2 });
-  }
-
-  else if (k === "slot") {
-    if (!displayValue || displayValue === "" || displayValue === "null") {
-      displayValue = "Journée entière";
-    }
-  }
-
-  // 3. LOGIQUE POUR LES DATES (Affichage jj/mm/aaaa)
-  else if ((k === "dateDebut" || k === "dateFin") && displayValue && String(displayValue).includes('-')) {
-    const [y, m, d] = String(displayValue).split('-');
-    displayValue = `${d}/${m}/${y}`;
-  }
-
-  // 4. NETTOYAGE DES CHIFFRES SIMPLE (Suppression espaces/DH pour l'aperçu)
-  else if (["cout", "cout_unitaire"].includes(k) && displayValue) {
-    const num = parseFloat(String(displayValue).replace(/\s/g, '').replace(',', '.'));
-    displayValue = !isNaN(num) ? num.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : displayValue;
-  }
-
-  // RENDU DE LA CELLULE
-  return (
-    <td key={k} style={{ 
-      padding: "8px 12px", 
-      color: T.pageText, 
-      whiteSpace: "nowrap", 
-      overflow: "hidden", 
-      textOverflow: "ellipsis", 
-      borderBottom: `1px solid ${T.pageBdr}`,
-      borderRight: `1px solid ${T.pageBdr}50`,
-      width: 140, // Largeur fixe pour alignement avec les headers
-      textAlign: "left"
-    }} title={String(displayValue ?? "")}>
-      {displayValue !== undefined && displayValue !== "" ? (
-        displayValue
-      ) : (
-        <span style={{ color: T.pageTer, fontStyle: "italic" }}>—</span>
-      )}
-    </td>
-  );
-})}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-    <div style={{ fontSize: 10, color: T.pageTer, marginTop: 6, fontStyle: "italic" }}>
-      * Faites défiler horizontalement pour voir toutes les colonnes.
-    </div>
-  </div>
-)}
+                {selectedCols.length > 0 && exportBase?.rows?.length > 0 && (
+                  <div style={{ marginTop:10 }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Aperçu (3 premières lignes)</div>
+                    <div style={{ overflowX:"auto", border:`1px solid ${T.pageBdr}`, borderRadius:6, background:"#fff" }}>
+                      <table style={{ borderCollapse:"collapse", fontSize:11, minWidth:"100%", tableLayout:"fixed" }}>
+                        <thead>
+                          <tr style={{ background:"rgba(55,53,47,0.04)" }}>
+                            {selectedCols.map(k => { const col = allCols.find(c => c.key === k); return <th key={k} style={{ padding:"8px 12px", fontWeight:600, color:T.pageSub, textAlign:"left", whiteSpace:"nowrap", borderBottom:`1px solid ${T.pageBdr}`, borderRight:`1px solid ${T.pageBdr}50`, fontSize:10, textTransform:"uppercase", width:140 }}>{col?.label || k}</th>; })}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {exportBase.rows.slice(0,3).map((row, ri) => (
+                            <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "rgba(55,53,47,0.015)" }}>
+                              {selectedCols.map(k => {
+                                let dv = row[k];
+                                if (k === "mois_planif") { if (!row.dateDebut) dv = "—"; else { const d = new Date(row.dateDebut+"T00:00:00"); dv = !isNaN(d.getTime()) ? MFR[d.getMonth()] : "Invalide"; } }
+                                else if (k === "cout_calcule") { const gk = `${row.theme}||${row.groupe}`; const gr = exportBase.rows.filter(r => `${r.theme}||${r.groupe}` === gk); const cB = parseFloat(String(row.cout||"0").replace(/\s/g,"").replace(",","."))||0; const j = parseFloat(row.jours)||0; const ef = gr.length||1; dv = Math.round(((cB*j)/ef)*100)/100; dv = dv.toLocaleString("fr-FR",{minimumFractionDigits:2}); }
+                                else if (k === "slot") { if (!dv || dv === "" || dv === "null") dv = "Journée entière"; }
+                                else if ((k === "dateDebut" || k === "dateFin") && dv && String(dv).includes("-")) { const [y,m,d] = String(dv).split("-"); dv = `${d}/${m}/${y}`; }
+                                else if (["cout","cout_unitaire"].includes(k) && dv) { const num = parseFloat(String(dv).replace(/\s/g,"").replace(",",".")); dv = !isNaN(num) ? num.toLocaleString("fr-FR",{minimumFractionDigits:2}) : dv; }
+                                return <td key={k} style={{ padding:"8px 12px", color:T.pageText, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", borderBottom:`1px solid ${T.pageBdr}`, borderRight:`1px solid ${T.pageBdr}50`, width:140, textAlign:"left" }} title={String(dv??"")}>{dv !== undefined && dv !== "" ? dv : <span style={{ color:T.pageTer, fontStyle:"italic" }}>—</span>}</td>;
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ fontSize:10, color:T.pageTer, marginTop:6, fontStyle:"italic" }}>* Faites défiler horizontalement pour voir toutes les colonnes.</div>
+                  </div>
+                )}
               </div>
             </div>
-
-            {/* Footer */}
-            <div style={{ padding: "12px 22px", borderTop: `1px solid ${T.pageBdr}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-              <span style={{ fontSize: 12, color: T.pageTer }}>
-                {exportBase?.rows?.length || 0} lignes × {selectedCols.length} colonnes
-              </span>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleSafeCloseExport}
-                  style={{ padding: "7px 16px", fontSize: 13, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                  Annuler
-                </button>
+            {/* Footer export */}
+            <div style={{ padding:"12px 22px", borderTop:`1px solid ${T.pageBdr}`, display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
+              <span style={{ fontSize:12, color:T.pageTer }}>{exportBase?.rows?.length || 0} lignes × {selectedCols.length} colonnes</span>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={handleSafeCloseExport} style={{ padding:"7px 16px", fontSize:13, color:T.pageSub, background:"transparent", border:`1px solid rgba(55,53,47,0.2)`, borderRadius:4, cursor:"pointer", fontFamily:"inherit" }}>Annuler</button>
                 <button onClick={doExport} disabled={!selectedCols.length || exporting}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", fontSize: 13, fontWeight: 600, color: "#fff", background: !selectedCols.length || exporting ? "#ccc" : "#448361", border: "none", borderRadius: 4, cursor: !selectedCols.length || exporting ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                  {exporting ? <Spinner size={13} color="#fff" /> : <FileUp style={{ width: 13, height: 13 }} />}
-                  {exporting ? "Export…" : `Exporter .xlsx`}
+                  style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 18px", fontSize:13, fontWeight:600, color:"#fff", background:!selectedCols.length||exporting?"#ccc":"#448361", border:"none", borderRadius:4, cursor:!selectedCols.length||exporting?"not-allowed":"pointer", fontFamily:"inherit" }}>
+                  {exporting ? <Spinner size={13} color="#fff" /> : <FileUp style={{ width:13, height:13 }} />}
+                  {exporting ? "Export…" : "Exporter .xlsx"}
                 </button>
               </div>
             </div>
@@ -1776,340 +1791,308 @@ if (k === "mois_planif") {
       )}
 
       {/* ══════════════════════════════════════════════════════════
-          CONTENU OVERVIEW
+          HEADER — date range
       ══════════════════════════════════════════════════════════ */}
-      {/* ══════════════════════════════════════════════════════════
-      CONTENU OVERVIEW — Header + Dashboard redesignés
-  ══════════════════════════════════════════════════════════ */}
-
-  {/* ── Date range ── */}
-  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: T.pageSub, marginBottom: 16 }}>
-    <CalendarRange style={{ width: 12, height: 12 }} />
-    {fmtRange(ws)}
-  </div>
-
-  {/* ── Header : logo + titre + actions ── */}
-  {editing ? (
-    /* Mode édition — inchangé */
-    <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, background: "rgba(55,53,47,0.015)", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14, marginBottom: 32 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em" }}>Modifier le workspace</div>
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <div style={{ flex: "2 1 200px" }}>
-          <div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Entreprise / Client</div>
-          <input autoFocus value={editForm.company} onChange={e => setEditForm(p => ({ ...p, company: e.target.value }))}
-            onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
-            style={{ ...iS, width: "100%", fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em", padding: "8px 12px", borderColor: T.accent, boxShadow: `0 0 0 2px ${T.accent}22` }} />
-        </div>
-        <div style={{ flex: "1 1 140px" }}>
-          <div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Date de début</div>
-          <input type="date" value={editForm.startDate}
-            onChange={e => { setEditForm(p => ({ ...p, startDate: e.target.value })); if (editForm.endDate && e.target.value > editForm.endDate) setEditForm(p => ({ ...p, endDate: "" })); }}
-            style={{ ...iS, width: "100%" }} onFocus={fI} onBlur={fO} />
-        </div>
-        <div style={{ flex: "1 1 140px" }}>
-          <div style={{ fontSize: 11, color: T.pageTer, marginBottom: 4 }}>Date de fin</div>
-          <input type="date" value={editForm.endDate} min={editForm.startDate || undefined}
-            onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
-            style={{ ...iS, width: "100%" }} onFocus={fI} onBlur={fO} />
-        </div>
+      <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:12, color:T.pageSub, marginBottom:16 }}>
+        <CalendarRange style={{ width:12, height:12 }} />
+        {fmtRange(ws)}
       </div>
-      {dur && (
-        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 4, background: "rgba(55,53,47,0.04)", border: `1px solid ${T.pageBdr}`, width: "fit-content" }}>
-          <CalendarRange style={{ width: 12, height: 12, color: T.pageSub }} />
-          <span style={{ fontSize: 12, color: T.pageSub, fontWeight: 500 }}>{dur} jour{dur > 1 ? "s" : ""}</span>
+
+      {/* ══════════════════════════════════════════════════════════
+          HEADER — logo + titre + actions
+      ══════════════════════════════════════════════════════════ */}
+      {editing ? (
+        <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:6, background:"rgba(55,53,47,0.015)", padding: isMobile ? "14px 16px" : "20px 24px", display:"flex", flexDirection:"column", gap:14, marginBottom:24 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em" }}>Modifier le workspace</div>
+          <div style={{ display:"flex", gap:12, alignItems:"flex-end", flexWrap:"wrap" }}>
+            <div style={{ flex:"2 1 180px" }}>
+              <div style={{ fontSize:11, color:T.pageTer, marginBottom:4 }}>Entreprise / Client</div>
+              <input autoFocus value={editForm.company} onChange={e => setEditForm(p => ({ ...p, company: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
+                style={{ ...iS, width:"100%", fontSize: isMobile ? 18 : 22, fontWeight:800, letterSpacing:"-0.02em", padding:"8px 12px", borderColor:T.accent, boxShadow:`0 0 0 2px ${T.accent}22` }} />
+            </div>
+            <div style={{ flex:"1 1 130px" }}>
+              <div style={{ fontSize:11, color:T.pageTer, marginBottom:4 }}>Date de début</div>
+              <input type="date" value={editForm.startDate}
+                onChange={e => { setEditForm(p => ({ ...p, startDate: e.target.value })); if (editForm.endDate && e.target.value > editForm.endDate) setEditForm(p => ({ ...p, endDate: "" })); }}
+                style={{ ...iS, width:"100%" }} onFocus={fI} onBlur={fO} />
+            </div>
+            <div style={{ flex:"1 1 130px" }}>
+              <div style={{ fontSize:11, color:T.pageTer, marginBottom:4 }}>Date de fin</div>
+              <input type="date" value={editForm.endDate} min={editForm.startDate || undefined}
+                onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
+                style={{ ...iS, width:"100%" }} onFocus={fI} onBlur={fO} />
+            </div>
+          </div>
+          {dur && (
+            <div style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 10px", borderRadius:4, background:"rgba(55,53,47,0.04)", border:`1px solid ${T.pageBdr}`, width:"fit-content" }}>
+              <CalendarRange style={{ width:12, height:12, color:T.pageSub }} />
+              <span style={{ fontSize:12, color:T.pageSub, fontWeight:500 }}>{dur} jour{dur > 1 ? "s" : ""}</span>
+            </div>
+          )}
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            <button onClick={saveEdit} disabled={saving || !editForm.company.trim()}
+              style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 18px", fontSize:13, fontWeight:600, color:"#fff", background: saving || !editForm.company.trim() ? "#e9e9e7" : "#37352f", border:"none", borderRadius:6, cursor: saving || !editForm.company.trim() ? "not-allowed" : "pointer", fontFamily:"inherit" }}>
+              {saving ? <Spinner size={13} color="#fff" /> : <Check style={{ width:13, height:13 }} />}
+              {saving ? "Enregistrement…" : "Enregistrer"}
+            </button>
+            <button onClick={() => setEditing(false)} style={{ padding:"7px 14px", fontSize:13, color:T.pageSub, background:"transparent", border:`1px solid rgba(55,53,47,0.2)`, borderRadius:6, cursor:"pointer", fontFamily:"inherit" }}>Annuler</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginBottom:24 }}>
+          {/* Ligne 1 : logo + titre */}
+          <div style={{ display:"flex", alignItems:"center", gap: isMobile ? 10 : 14, marginBottom:10 }}>
+            <div style={{ width: isMobile ? 52 : 72, height: isMobile ? 52 : 72, borderRadius:10, border:`1px solid ${T.pageBdr}`, background:"#fafaf9", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, overflow:"hidden", boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
+              {ws.logoUrl
+                ? <img src={`${API_BASE.replace("/api","")}${ws.logoUrl}`} alt={ws.company} style={{ width:"100%", height:"100%", objectFit:"contain", padding:6, boxSizing:"border-box" }} />
+                : <Building2 style={{ width: isMobile ? 22 : 28, height: isMobile ? 22 : 28, color:T.pageTer, strokeWidth:1.4 }} />
+              }
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <h1 style={{ fontSize: isMobile ? 20 : isTablet ? 24 : 28, fontWeight:800, color:T.pageText, letterSpacing:"-0.03em", lineHeight:1.15, margin:"0 0 4px", wordBreak:"break-word" }}>
+                {ws.company}
+              </h1>
+              <div style={{ fontSize:12, color:T.pageTer }}>
+                Créé le {new Date(ws.createdAt || Date.now()).toLocaleDateString("fr-FR")}
+              </div>
+            </div>
+          </div>
+          {/* Ligne 2 : boutons */}
+          <div style={{ paddingLeft: isMobile ? 0 : 86, display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+            <input ref={logoInputRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" onChange={handleLogoUpload} style={{ display:"none" }} />
+            <div style={{ display:"flex", border:`1px solid ${T.pageBdr}`, borderRadius:6, overflow:"hidden" }}>
+              <button onClick={() => logoInputRef.current?.click()}
+                style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 11px", fontSize:12, fontWeight:500, color:T.pageSub, background:"#fff", border:"none", borderRight: ws.logoUrl ? `1px solid ${T.pageBdr}` : "none", cursor:"pointer", fontFamily:"inherit" }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                {ws.logoUrl ? "Changer" : "Ajouter logo"}
+              </button>
+              {ws.logoUrl && (
+                <button onClick={handleLogoDelete} style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 10px", fontSize:12, fontWeight:500, color:"#d44c47", background:"#fff", border:"none", cursor:"pointer", fontFamily:"inherit" }}>
+                  <Trash2 style={{ width:11, height:11 }} /> Retirer
+                </button>
+              )}
+            </div>
+            <div style={{ width:1, height:18, background:T.pageBdr, flexShrink:0 }} />
+            <button onClick={startEdit}
+              style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 11px", fontSize:12, fontWeight:500, color:T.pageSub, background:"#fff", border:`1px solid ${T.pageBdr}`, borderRadius:6, cursor:"pointer", fontFamily:"inherit" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#f7f7f5"}
+              onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+              <Edit2 style={{ width:11, height:11 }} /> Modifier
+            </button>
+            {ws.hasExportBase && (
+              <button onClick={openExport}
+                style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 11px", fontSize:12, fontWeight:500, color:"#3b6d11", background:"#eaf3de", border:"1px solid #c0dd97", borderRadius:6, cursor:"pointer", fontFamily:"inherit" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#daecc8"}
+                onMouseLeave={e => e.currentTarget.style.background = "#eaf3de"}>
+                <FileUp style={{ width:11, height:11 }} />
+                {isMobile ? "Excel" : "Exporter Excel"}
+              </button>
+            )}
+            <button onClick={() => setConfirmDelete(true)}
+              style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 11px", fontSize:12, fontWeight:500, color:"#d44c47", background:"#fff2f2", border:"1px solid #ffd5d4", borderRadius:6, cursor:"pointer", fontFamily:"inherit" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#ffe4e3"}
+              onMouseLeave={e => e.currentTarget.style.background = "#fff2f2"}>
+              <Trash2 style={{ width:11, height:11 }} />
+              {!isMobile && " Supprimer"}
+            </button>
+          </div>
         </div>
       )}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={saveEdit} disabled={saving || !editForm.company.trim()}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", fontSize: 13, fontWeight: 600, color: "#fff", background: saving || !editForm.company.trim() ? "#e9e9e7" : "#37352f", border: "none", borderRadius: 6, cursor: saving || !editForm.company.trim() ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-          {saving ? <Spinner size={13} color="#fff" /> : <Check style={{ width: 13, height: 13 }} />}
-          {saving ? "Enregistrement…" : "Enregistrer"}
-        </button>
-        <button onClick={() => setEditing(false)}
-          style={{ padding: "7px 14px", fontSize: 13, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>
-          Annuler
-        </button>
-      </div>
-    </div>
-  ) : (
-    <div style={{ marginBottom: 28 }}>
 
-      {/* Ligne 1 : logo + titre (le titre peut être long, il wrap) */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
-        {/* Logo — plus grand et visible */}
-        <div style={{ width: 72, height: 72, borderRadius: 10, border: `1px solid ${T.pageBdr}`, background: "#fafaf9", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-          {ws.logoUrl
-            ? <img src={`${API_BASE.replace("/api", "")}${ws.logoUrl}`} alt={ws.company} style={{ width: "100%", height: "100%", objectFit: "contain", padding: 6, boxSizing: "border-box" }} />
-            : <Building2 style={{ width: 28, height: 28, color: T.pageTer, strokeWidth: 1.4 }} />
-          }
-        </div>
-        {/* Titre + date — flex: 1 pour prendre tout l'espace restant */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ fontSize: 28, fontWeight: 800, color: T.pageText, letterSpacing: "-0.03em", lineHeight: 1.15, margin: "0 0 4px", wordBreak: "break-word" }}>
-            {ws.company}
-          </h1>
-          <div style={{ fontSize: 12, color: T.pageTer }}>
-            Créé le {new Date(ws.createdAt || Date.now()).toLocaleDateString("fr-FR")}
-          </div>
-        </div>
-      </div>
+      {divider}
 
-      {/* Ligne 2 : boutons d'action — alignés sous le titre (avec indent = largeur logo + gap) */}
-      <div style={{ paddingLeft: 86, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <input ref={logoInputRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" onChange={handleLogoUpload} style={{ display: "none" }} />
+      {/* ══════════════════════════════════════════════════════════
+          DASHBOARD
+      ══════════════════════════════════════════════════════════ */}
+      {(() => {
+        const totalJours = tasks.reduce((s, t) => {
+          if (!t.start || !t.end) return s;
+          return s + calcWD(t.start, t.end, [6,0], true, []);
+        }, 0);
+        const totalCout = candidats.reduce((s, c) => {
+          const v = parseFloat(String(c.cout||"0").replace(/\s/g,"").replace(",",".")) || 0;
+          return s + v;
+        }, 0);
+        const uniqueThemes  = [...new Set(tasks.map(t => t.group).filter(Boolean))];
+        const uniqueGroupes = tasks.length;
+        const now = new Date(); now.setHours(0,0,0,0);
+        const startOfNextWeek = new Date(now); startOfNextWeek.setDate(now.getDate() + (7 - now.getDay() + 1) % 7 || 7);
+        const endOfNextWeek   = new Date(startOfNextWeek); endOfNextWeek.setDate(startOfNextWeek.getDate() + 6);
+        const inProgress = tasks.filter(t => t.start && t.end && pd(t.start) <= now && pd(t.end) >= now);
+        const upcoming   = tasks.filter(t => t.start && pd(t.start) > now && pd(t.start) <= endOfNextWeek);
+        const doneCnt    = tasks.filter(t => t.end && pd(t.end) < now).length;
+        const pct        = tasks.length > 0 ? Math.round((doneCnt / tasks.length) * 100) : 0;
+        const avgPerCand = uniqueCandidatsCount > 0 ? Math.round(totalCout / uniqueCandidatsCount) : 0;
+        const avgPerDay  = totalJours > 0 ? Math.round(totalCout / totalJours) : 0;
+        const panelCard  = { background:"#fff", border:`1px solid ${T.pageBdr}`, borderRadius:8, padding:"16px 18px" };
+        const panelTitle = { fontSize:10, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 };
 
-        {/* Groupe logo (Changer / Retirer) */}
-        <div style={{ display: "flex", border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
-          <button
-            onClick={() => logoInputRef.current?.click()}
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", fontSize: 12, fontWeight: 500, color: T.pageSub, background: "#fff", border: "none", borderRight: ws.logoUrl ? `1px solid ${T.pageBdr}` : "none", cursor: "pointer", fontFamily: "inherit" }}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            {ws.logoUrl ? "Changer logo" : "Ajouter logo"}
-          </button>
-          {ws.logoUrl && (
-            <button onClick={handleLogoDelete} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 12, fontWeight: 500, color: "#d44c47", background: "#fff", border: "none", cursor: "pointer", fontFamily: "inherit" }}>
-              <Trash2 style={{ width: 11, height: 11 }} /> Retirer
-            </button>
-          )}
-        </div>
+        return (
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
 
-        {/* Séparateur */}
-        <div style={{ width: 1, height: 18, background: T.pageBdr, flexShrink: 0 }} />
-
-        {/* Modifier */}
-        <button
-          onClick={startEdit}
-          style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", fontSize: 12, fontWeight: 500, color: T.pageSub, background: "#fff", border: `1px solid ${T.pageBdr}`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
-          onMouseEnter={e => e.currentTarget.style.background = "#f7f7f5"}
-          onMouseLeave={e => e.currentTarget.style.background = "#fff"}
-        >
-          <Edit2 style={{ width: 11, height: 11 }} /> Modifier
-        </button>
-
-        {/* Exporter Excel */}
-        {ws.hasExportBase && (
-          <button
-            onClick={openExport}
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", fontSize: 12, fontWeight: 500, color: "#3b6d11", background: "#eaf3de", border: "1px solid #c0dd97", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
-            onMouseEnter={e => e.currentTarget.style.background = "#daecc8"}
-            onMouseLeave={e => e.currentTarget.style.background = "#eaf3de"}
-          >
-            <FileUp style={{ width: 11, height: 11 }} /> Exporter Excel
-          </button>
-        )}
-
-        {/* Supprimer */}
-        <button
-          onClick={() => setConfirmDelete(true)}
-          style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", fontSize: 12, fontWeight: 500, color: "#d44c47", background: "#fff2f2", border: "1px solid #ffd5d4", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
-          onMouseEnter={e => e.currentTarget.style.background = "#ffe4e3"}
-          onMouseLeave={e => e.currentTarget.style.background = "#fff2f2"}
-        >
-          <Trash2 style={{ width: 11, height: 11 }} /> Supprimer
-        </button>
-      </div>
-    </div>
-  )}
-
-  {divider}
-
-  {/* ══════════════════════════════════════════
-      DASHBOARD — métriques enrichies (inchangé logiquement)
-  ══════════════════════════════════════════ */}
-  {(() => {
-    const totalJours = tasks.reduce((s, t) => {
-      if (!t.start || !t.end) return s;
-      return s + calcWD(t.start, t.end, [6, 0], true, []);
-    }, 0);
-
-    const totalCout = candidats.reduce((s, c) => {
-      const v = parseFloat(String(c.cout || "0").replace(/\s/g, "").replace(",", ".")) || 0;
-      return s + v;
-    }, 0);
-
-    const uniqueThemes = [...new Set(tasks.map(t => t.group).filter(Boolean))];
-    const uniqueGroupes = tasks.length;
-
-    const now = new Date(); now.setHours(0, 0, 0, 0);
-    const startOfNextWeek = new Date(now);
-    startOfNextWeek.setDate(now.getDate() + (7 - now.getDay() + 1) % 7 || 7);
-    const endOfNextWeek = new Date(startOfNextWeek);
-    endOfNextWeek.setDate(startOfNextWeek.getDate() + 6);
-
-    const inProgress = tasks.filter(t => {
-      if (!t.start || !t.end) return false;
-      return pd(t.start) <= now && pd(t.end) >= now;
-    });
-    const upcoming = tasks.filter(t => {
-      if (!t.start) return false;
-      const s = pd(t.start);
-      return s > now && s <= endOfNextWeek;
-    });
-
-    const done = tasks.filter(t => t.end && pd(t.end) < now).length;
-    const pct = tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
-
-    const avgPerCand = uniqueCandidatsCount > 0 ? Math.round(totalCout / uniqueCandidatsCount) : 0;
-    const avgPerDay  = totalJours > 0 ? Math.round(totalCout / totalJours) : 0;
-
-    // Styles locaux
-    const kpiCard = { background: "#fafaf9", border: `1px solid #f0f0ee`, borderRadius: 8, padding: "14px 16px" };
-    const kpiLabel = { fontSize: 11, color: T.pageSub, marginBottom: 4 };
-    const kpiValue = { fontSize: 26, fontWeight: 700, color: T.pageText, letterSpacing: "-0.03em", lineHeight: 1 };
-    const kpiSub   = { fontSize: 11, color: T.pageTer, marginTop: 3 };
-    const panelCard = { background: "#fff", border: `1px solid ${T.pageBdr}`, borderRadius: 8, padding: "16px 18px" };
-    const panelTitle = { fontSize: 10, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 };
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-
-        {/* KPI x4 — colorés */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10 }}>
-          {[
-            {
-              label: "Thèmes", value: uniqueThemes.length, sub: "formations distinctes",
-              bg: "#e6f1fb", border: "#b5d4f4", labelColor: "#185fa5",
-              valueColor: "#0c447c", subColor: "#378add",
-              icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>,
-            },
-            {
-              label: "Groupes", value: uniqueGroupes, sub: "groupes planifiés",
-              bg: "#eeedfe", border: "#afa9ec", labelColor: "#534ab7",
-              valueColor: "#3c3489", subColor: "#7f77dd",
-              icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#534ab7" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
-            },
-            {
-              label: "Bénéficiaires", value: uniqueCandidatsCount, sub: "candidats inscrits",
-              bg: "#e1f5ee", border: "#9fe1cb", labelColor: "#0f6e56",
-              valueColor: "#085041", subColor: "#1d9e75",
-              icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0f6e56" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>,
-            },
-            {
-              label: "Jours formation", value: totalJours, sub: "jours ouvrés cumulés",
-              bg: "#faeeda", border: "#fac775", labelColor: "#854f0b",
-              valueColor: "#633806", subColor: "#ba7517",
-              icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#854f0b" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
-            },
-          ].map(k => (
-            <div key={k.label} style={{ background: k.bg, border: `1px solid ${k.border}`, borderRadius: 8, padding: "16px 18px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                <div style={{ width: 26, height: 26, borderRadius: 6, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  {k.icon}
-                </div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: k.labelColor }}>{k.label}</div>
-              </div>
-              <div style={{ fontSize: 30, fontWeight: 800, color: k.valueColor, letterSpacing: "-0.04em", lineHeight: 1 }}>
-                {k.value.toLocaleString("fr-FR")}
-              </div>
-              <div style={{ fontSize: 11, color: k.subColor, marginTop: 4 }}>{k.sub}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Avancement global */}
-        <div style={panelCard}>
-          <div style={panelTitle}>Avancement global</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <div style={{ fontSize: 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em", lineHeight: 1, flexShrink: 0 }}>{pct}%</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.pageSub, marginBottom: 6 }}>
-                <span>{done} groupe{done !== 1 ? "s" : ""} terminé{done !== 1 ? "s" : ""}</span>
-                <span>{inProgress.length} en cours · {upcoming.length} à venir</span>
-              </div>
-              <div style={{ height: 4, borderRadius: 99, background: "rgba(55,53,47,0.1)", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${pct}%`, background: "#448361", borderRadius: 99 }} />
-              </div>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
-            {[
-              { color: "#448361", label: `Terminés (${done})` },
-              { color: "#cb912f", label: `En cours (${inProgress.length})` },
-              { color: "rgba(55,53,47,0.18)", label: `À venir (${Math.max(0, tasks.length - done - inProgress.length)})` },
-            ].map(l => (
-              <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.pageSub }}>
-                <div style={{ width: 8, height: 8, borderRadius: 2, background: l.color, flexShrink: 0 }} />
-                {l.label}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* En cours + À venir */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10 }}>
-          {/* En cours */}
-          <div style={panelCard}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, ...panelTitle }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#cb912f", flexShrink: 0 }} />
-              Thèmes en cours — cette semaine
-            </div>
-            {inProgress.length === 0
-              ? <div style={{ fontSize: 12, color: T.pageTer, fontStyle: "italic" }}>Aucune formation en cours</div>
-              : inProgress.slice(0, 4).map((t, i) => {
-                  const pal = grpTag(t.group);
-                  return (
-                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: i < Math.min(inProgress.length, 4) - 1 ? `1px solid ${T.pageBdr}` : "none" }}>
-                      <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 3, background: pal.bg, color: pal.text, flexShrink: 0 }}>G{t.groupe || "—"}</span>
-                      <span style={{ fontSize: 12, color: T.pageText, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.group}</span>
-                      <span style={{ fontSize: 11, color: T.pageSub, fontFamily: "monospace", flexShrink: 0 }}>→ {fmt(t.end)}</span>
-                    </div>
-                  );
-                })
-            }
-          </div>
-
-          {/* À venir */}
-          <div style={panelCard}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, ...panelTitle }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#337ea9", flexShrink: 0 }} />
-              Thèmes à venir — semaine prochaine
-            </div>
-            {upcoming.length === 0
-              ? <div style={{ fontSize: 12, color: T.pageTer, fontStyle: "italic" }}>Aucune formation prévue la semaine prochaine</div>
-              : upcoming.slice(0, 4).map((t, i) => {
-                  const pal = grpTag(t.group);
-                  return (
-                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: i < Math.min(upcoming.length, 4) - 1 ? `1px solid ${T.pageBdr}` : "none" }}>
-                      <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 3, background: pal.bg, color: pal.text, flexShrink: 0 }}>G{t.groupe || "—"}</span>
-                      <span style={{ fontSize: 12, color: T.pageText, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.group}</span>
-                      <span style={{ fontSize: 11, color: T.pageSub, fontFamily: "monospace", flexShrink: 0 }}>dès {fmt(t.start)}</span>
-                    </div>
-                  );
-                })
-            }
-          </div>
-        </div>
-
-        {/* Coût global */}
-        {totalCout > 0 && (
-          <div style={panelCard}>
-            <div style={panelTitle}>Coût global du plan de formation</div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
-              <span style={{ fontSize: 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em" }}>
-                {totalCout.toLocaleString("fr-FR")}
-              </span>
-              <span style={{ fontSize: 14, color: T.pageSub }}>MAD</span>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, paddingTop: 12, borderTop: `1px solid ${T.pageBdr}` }}>
+            {/* KPI x4 — 2 col mobile, 4 col desktop */}
+            <div style={{ display:"grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,minmax(0,1fr))", gap:10 }}>
               {[
-                { label: "Coût moyen / candidat", value: `${avgPerCand.toLocaleString("fr-FR")} MAD` },
-                { label: "Coût moyen / jour",     value: `${avgPerDay.toLocaleString("fr-FR")} MAD` },
-                { label: "Budget consommé",        value: `${pct}%`, color: "#448361" },
+                { label:"Thèmes",          value:uniqueThemes.length,      sub:"formations distinctes",  bg:"#e6f1fb", border:"#b5d4f4", labelColor:"#185fa5", valueColor:"#0c447c", subColor:"#378add",  icon:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg> },
+                { label:"Groupes",         value:uniqueGroupes,            sub:"groupes planifiés",      bg:"#eeedfe", border:"#afa9ec", labelColor:"#534ab7", valueColor:"#3c3489", subColor:"#7f77dd",  icon:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#534ab7" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
+                { label:"Bénéficiaires",   value:uniqueCandidatsCount,     sub:"candidats inscrits",     bg:"#e1f5ee", border:"#9fe1cb", labelColor:"#0f6e56", valueColor:"#085041", subColor:"#1d9e75",  icon:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0f6e56" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg> },
+                { label:"Jours formation", value:totalJours,               sub:"jours ouvrés cumulés",   bg:"#faeeda", border:"#fac775", labelColor:"#854f0b", valueColor:"#633806", subColor:"#ba7517",  icon:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#854f0b" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> },
               ].map(k => (
-                <div key={k.label}>
-                  <div style={{ fontSize: 11, color: T.pageSub, marginBottom: 3 }}>{k.label}</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: k.color || T.pageText }}>{k.value}</div>
+                <div key={k.label} style={{ background:k.bg, border:`1px solid ${k.border}`, borderRadius:8, padding: isMobile ? "12px 14px" : "16px 18px" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+                    <div style={{ width:24, height:24, borderRadius:5, background:"#fff", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{k.icon}</div>
+                    <div style={{ fontSize:11, fontWeight:600, color:k.labelColor }}>{k.label}</div>
+                  </div>
+                  <div style={{ fontSize: isMobile ? 24 : 30, fontWeight:800, color:k.valueColor, letterSpacing:"-0.04em", lineHeight:1 }}>
+                    {k.value.toLocaleString("fr-FR")}
+                  </div>
+                  <div style={{ fontSize:11, color:k.subColor, marginTop:3 }}>{k.sub}</div>
                 </div>
               ))}
             </div>
-          </div>
-        )}
-      </div>
-    );
-  })()}
 
-      
+            {/* Avancement global */}
+            <div style={panelCard}>
+              <div style={panelTitle}>Avancement global</div>
+              <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                <div style={{ fontSize:28, fontWeight:800, color:T.pageText, letterSpacing:"-0.04em", lineHeight:1, flexShrink:0 }}>{pct}%</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:T.pageSub, marginBottom:6 }}>
+                    <span>{doneCnt} groupe{doneCnt !== 1 ? "s" : ""} terminé{doneCnt !== 1 ? "s" : ""}</span>
+                    {!isMobile && <span>{inProgress.length} en cours · {upcoming.length} à venir</span>}
+                  </div>
+                  <div style={{ height:4, borderRadius:99, background:"rgba(55,53,47,0.1)", overflow:"hidden" }}>
+                    <div style={{ height:"100%", width:`${pct}%`, background:"#448361", borderRadius:99 }} />
+                  </div>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:12, marginTop:10, flexWrap:"wrap" }}>
+                {[
+                  { color:"#448361",              label:`Terminés (${doneCnt})` },
+                  { color:"#cb912f",              label:`En cours (${inProgress.length})` },
+                  { color:"rgba(55,53,47,0.18)", label:`À venir (${Math.max(0, tasks.length - doneCnt - inProgress.length)})` },
+                ].map(l => (
+                  <div key={l.label} style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:T.pageSub }}>
+                    <div style={{ width:8, height:8, borderRadius:2, background:l.color, flexShrink:0 }} />
+                    {l.label}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* En cours + À venir — 1 col mobile */}
+            <div style={{ display:"grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2,minmax(0,1fr))", gap:10 }}>
+              <div style={panelCard}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, ...panelTitle }}>
+                  <div style={{ width:6, height:6, borderRadius:"50%", background:"#cb912f", flexShrink:0 }} />
+                  Thèmes en cours — cette semaine
+                </div>
+                {inProgress.length === 0
+                  ? <div style={{ fontSize:12, color:T.pageTer, fontStyle:"italic" }}>Aucune formation en cours</div>
+                  : inProgress.slice(0,4).map((t, i) => {
+                      const pal = grpTag(t.group);
+                      return (
+                        <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom: i < Math.min(inProgress.length,4)-1 ? `1px solid ${T.pageBdr}` : "none" }}>
+                          <span style={{ fontSize:10, fontWeight:600, padding:"1px 6px", borderRadius:3, background:pal.bg, color:pal.text, flexShrink:0 }}>G{t.groupe||"—"}</span>
+                          <span style={{ fontSize:12, color:T.pageText, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{t.group}</span>
+                          <span style={{ fontSize:11, color:T.pageSub, fontFamily:"monospace", flexShrink:0 }}>→ {fmt(t.end)}</span>
+                        </div>
+                      );
+                    })
+                }
+              </div>
+              <div style={panelCard}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, ...panelTitle }}>
+                  <div style={{ width:6, height:6, borderRadius:"50%", background:"#337ea9", flexShrink:0 }} />
+                  Thèmes à venir — semaine prochaine
+                </div>
+                {upcoming.length === 0
+                  ? <div style={{ fontSize:12, color:T.pageTer, fontStyle:"italic" }}>Aucune formation prévue la semaine prochaine</div>
+                  : upcoming.slice(0,4).map((t, i) => {
+                      const pal = grpTag(t.group);
+                      return (
+                        <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom: i < Math.min(upcoming.length,4)-1 ? `1px solid ${T.pageBdr}` : "none" }}>
+                          <span style={{ fontSize:10, fontWeight:600, padding:"1px 6px", borderRadius:3, background:pal.bg, color:pal.text, flexShrink:0 }}>G{t.groupe||"—"}</span>
+                          <span style={{ fontSize:12, color:T.pageText, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{t.group}</span>
+                          <span style={{ fontSize:11, color:T.pageSub, fontFamily:"monospace", flexShrink:0 }}>dès {fmt(t.start)}</span>
+                        </div>
+                      );
+                    })
+                }
+              </div>
+            </div>
+
+            {/* Coût global */}
+            {totalCout > 0 && (
+              <div style={panelCard}>
+                <div style={panelTitle}>Coût global du plan de formation</div>
+                <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:14 }}>
+                  <span style={{ fontSize: isMobile ? 24 : 32, fontWeight:800, color:T.pageText, letterSpacing:"-0.04em" }}>
+                    {totalCout.toLocaleString("fr-FR")}
+                  </span>
+                  <span style={{ fontSize:14, color:T.pageSub }}>MAD</span>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,minmax(0,1fr))", gap:12, paddingTop:12, borderTop:`1px solid ${T.pageBdr}` }}>
+                  {[
+                    { label:"Coût moyen / candidat", value:`${avgPerCand.toLocaleString("fr-FR")} MAD` },
+                    { label:"Coût moyen / jour",      value:`${avgPerDay.toLocaleString("fr-FR")} MAD` },
+                    { label:"Budget consommé",         value:`${pct}%`, color:"#448361" },
+                  ].map(k => (
+                    <div key={k.label}>
+                      <div style={{ fontSize:11, color:T.pageSub, marginBottom:3 }}>{k.label}</div>
+                      <div style={{ fontSize:16, fontWeight:700, color:k.color||T.pageText }}>{k.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </div>
+        );
+      })()}
+
+      {divider}
+
+      {/* Tâches récentes */}
+      {tasks.length > 0 && (
+        <>
+          <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>Tâches récentes</div>
+          <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:4, overflow:"hidden", marginBottom:32 }}>
+            {tasks.slice(0,5).map((t, i) => (
+              <div key={t.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"8px 14px", borderBottom: i < Math.min(tasks.length,5)-1 ? `1px solid ${T.pageBdr}` : "none", background: i%2===0?"#fff":"rgba(55,53,47,0.015)" }}>
+                <span style={{ fontSize:11, color:T.pageTer, fontFamily:"monospace", width:20, textAlign:"right", flexShrink:0 }}>{i+1}</span>
+                <span style={{ flex:1, fontSize:13, color:T.pageText, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{t.name}</span>
+                <Tag label={t.group} scheme={grpTag(t.group)} />
+                <span style={{ fontSize:11, color:T.pageSub, fontFamily:"monospace", flexShrink:0 }}>{fmt(t.end)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Candidats récents */}
+      {candidats.length > 0 && (
+        <>
+          <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>Candidats récents</div>
+          <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:4, overflow:"hidden" }}>
+            {candidats.slice(0,4).map((c, i) => {
+              const st = C_STATUS.find(s => s.key === c.statut) || C_STATUS[0];
+              return (
+                <div key={c.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"8px 14px", borderBottom: i < Math.min(candidats.length,4)-1 ? `1px solid ${T.pageBdr}` : "none", background: i%2===0?"#fff":"rgba(55,53,47,0.015)" }}>
+                  <div style={{ width:26, height:26, borderRadius:4, background:"rgba(55,53,47,0.08)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:T.pageSub, flexShrink:0 }}>
+                    {c.nom.charAt(0)}{c.prenom?.charAt(0)||""}
+                  </div>
+                  <span style={{ flex:1, fontSize:13, color:T.pageText, fontWeight:500 }}>{c.nom} {c.prenom}</span>
+                  {!isMobile && <span style={{ fontSize:12, color:T.pageSub }}>{c.poste}</span>}
+                  <Tag label={c.statut} scheme={{ text:st.text, bg:st.bg, bd:st.bd }} />
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
     </div>
   );
 }
@@ -2267,6 +2250,14 @@ const BackgroundStripes = memo(function BackgroundStripes({ totalDays, projStart
 
 const GRow = memo(function GRow({ task, SC, cs, zoom, projStart, totalDays, todayOff, wd, sh, vacs, onEdit, onDelete, onUpdate, onUpdateSlot, registerScrollable, unregisterScrollable, slotMap, isLiveConflict, conflictTypes, wdays, prog, candidatCount }) {
   const [hov, setHov] = useState(false);
+  
+  // ── Lookup par key (fix responsive) ──
+  const scByKey = useMemo(() => {
+    const m = {};
+    SC.forEach(col => { m[col.key] = col; });
+    return m;
+  }, [SC]);
+
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current; if (!el) return;
@@ -2304,8 +2295,9 @@ const GRow = memo(function GRow({ task, SC, cs, zoom, projStart, totalDays, toda
   return (
     <div style={{ display:"flex",height:RH,background:rowBg(),borderBottom:`1px solid ${T.pageBdr}`,transition:"background 0.06s" }} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}>
       <div style={{ display:"flex",flexShrink:0 }}>
-        {/* Thème */}
-        <div style={{ ...cs(SC[0].sw),padding:"0 8px",gap:5,justifyContent:"flex-start" }}>
+
+        {/* Thème — toujours affiché */}
+        <div style={{ ...cs(scByKey["group"].sw),padding:"0 8px",gap:5,justifyContent:"flex-start" }}>
           {dot
             ? <div style={{ width:7,height:7,borderRadius:"50%",background:dot,flexShrink:0,boxShadow:`0 0 0 2px ${dot}33`,animation:conflictTypes?.has("overlap")?"pulse-conflict 1.5s ease-in-out infinite":"none" }} />
             : <div style={{ width:8,height:8,borderRadius:2,background:pal.text,flexShrink:0 }} />
@@ -2316,65 +2308,55 @@ const GRow = memo(function GRow({ task, SC, cs, zoom, projStart, totalDays, toda
             <button onClick={onDelete} style={{ width:20,height:20,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3,border:"none",background:"transparent",cursor:"pointer",color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(212,76,71,0.1)";e.currentTarget.style.color="#d44c47";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Trash2 style={{ width:11,height:11 }} /></button>
           </div>
         </div>
-        {/* Grp */}
-        <div style={{ ...cs(SC[1].sw),justifyContent:"center",padding:"0 4px" }}>
+
+        {/* Grp — toujours affiché */}
+        <div style={{ ...cs(scByKey["groupe"].sw),justifyContent:"center",padding:"0 4px" }}>
           <span style={{ fontSize:12,fontWeight:600,color:T.pageSub }}>{displayGrp?`G${displayGrp}`:"—"}</span>
         </div>
-        {/* Cand. — nb de candidats réels en DB pour ce groupe */}
-        <div style={{ ...cs(SC[2].sw),justifyContent:"center",padding:"0 4px" }}>
+
+        {/* Cand. — toujours affiché */}
+        <div style={{ ...cs(scByKey["count"].sw),justifyContent:"center",padding:"0 4px" }}>
           <span style={{ fontSize:11,fontFamily:"monospace",color:candidatCount>0?T.pageSub:T.pageTer }}>{candidatCount>0?candidatCount:"—"}</span>
         </div>
-        {/* Jours / AM-PM */}
-        <div style={{ ...cs(SC[3].sw), justifyContent: "center", padding: "0 4px" }}>
-    {isHD ? (
-      <div style={{ 
-        display: "flex", 
-        borderRadius: 4, 
-        border: `1px solid ${T.pageBdr}`, 
-        overflow: "hidden",
-        background: "#fff" 
-      }}>
-        <button 
-          onClick={() => onUpdateSlot(task.id, "matin")}
-          style={{
-            padding: "2px 4px", fontSize: "8px", fontWeight: "800", border: "none",
-            cursor: "pointer",
-            background: effectiveSlot === "matin" ? "rgba(203,145,47,0.2)" : "transparent",
-            color: effectiveSlot === "matin" ? "#cb912f" : T.pageTer,
-            borderRight: `1px solid ${T.pageBdr}`
-          }}>AM</button>
-        <button 
-          onClick={() => onUpdateSlot(task.id, "après-midi")}
-          style={{
-            padding: "2px 4px", fontSize: "8px", fontWeight: "800", border: "none",
-            cursor: "pointer",
-            background: effectiveSlot === "après-midi" ? "rgba(51,126,169,0.2)" : "transparent",
-            color: effectiveSlot === "après-midi" ? "#337ea9" : T.pageTer
-          }}>PM</button>
-      </div>
-    ) : (
-      <span style={{ fontSize: 12, fontFamily: "monospace", color: T.pageSub }}>{wdays}</span>
-    )}
-  </div>
-        {/* Début */}
-        <div style={{ ...cs(SC[4].sw),justifyContent:"center",padding:"0 4px",cursor:"pointer" }}
-  title="Double-clic pour modifier"
-  onDoubleClick={onEdit}>
-  <span style={{ fontSize:11,fontFamily:"monospace",color:T.pageSub }}>{fmt(task.start)}</span>
-</div>
-        {/* Avancement */}
-        <div style={{ ...cs(SC[5].sw),padding:"0 10px",flexDirection:"column",alignItems:"stretch",justifyContent:"center",gap:3 }}>
-          <div style={{ height:3,background:"rgba(55,53,47,0.1)",borderRadius:99,overflow:"hidden" }}>
-            <div style={{ height:"100%",width:`${prog.pct}%`,background:prog.pct===100?T.tagGreen.text:"rgba(55,53,47,0.45)",borderRadius:99 }} />
+
+        {/* Jours / AM-PM — masqué sur mobile si filtré */}
+        {scByKey["wdays"] && (
+          <div style={{ ...cs(scByKey["wdays"].sw), justifyContent: "center", padding: "0 4px" }}>
+            {isHD ? (
+              <div style={{ display:"flex",borderRadius:4,border:`1px solid ${T.pageBdr}`,overflow:"hidden",background:"#fff" }}>
+                <button onClick={() => onUpdateSlot(task.id, "matin")} style={{ padding:"2px 4px",fontSize:"8px",fontWeight:"800",border:"none",cursor:"pointer",background:effectiveSlot==="matin"?"rgba(203,145,47,0.2)":"transparent",color:effectiveSlot==="matin"?"#cb912f":T.pageTer,borderRight:`1px solid ${T.pageBdr}` }}>AM</button>
+                <button onClick={() => onUpdateSlot(task.id, "après-midi")} style={{ padding:"2px 4px",fontSize:"8px",fontWeight:"800",border:"none",cursor:"pointer",background:effectiveSlot==="après-midi"?"rgba(51,126,169,0.2)":"transparent",color:effectiveSlot==="après-midi"?"#337ea9":T.pageTer }}>PM</button>
+              </div>
+            ) : (
+              <span style={{ fontSize:12,fontFamily:"monospace",color:T.pageSub }}>{wdays}</span>
+            )}
           </div>
-          <span style={{ fontSize:10,color:T.pageTer,fontFamily:"monospace" }}>{prog.pct}%</span>
+        )}
+
+        {/* Début — toujours affiché */}
+        <div style={{ ...cs(scByKey["start"].sw),justifyContent:"center",padding:"0 4px",cursor:"pointer" }}
+          title="Double-clic pour modifier"
+          onDoubleClick={onEdit}>
+          <span style={{ fontSize:11,fontFamily:"monospace",color:T.pageSub }}>{fmt(task.start)}</span>
         </div>
-        {/* Fin */}
-        <div style={{ ...cs(SC[6].sw),justifyContent:"center",padding:"0 4px",borderRight:`1px solid ${T.pageBdr}`,cursor:"pointer" }}
-  title="Double-clic pour modifier"
-  onDoubleClick={onEdit}>
-  <span style={{ fontSize:11,fontFamily:"monospace",color:T.pageSub }}>{fmt(task.end)}</span>
-</div>
+
+        {/* Avancement — masqué sur tablette/mobile si filtré */}
+        {scByKey["prog"] && (
+          <div style={{ ...cs(scByKey["prog"].sw),padding:"0 10px",flexDirection:"column",alignItems:"stretch",justifyContent:"center",gap:3 }}>
+            <div style={{ height:3,background:"rgba(55,53,47,0.1)",borderRadius:99,overflow:"hidden" }}>
+              <div style={{ height:"100%",width:`${prog.pct}%`,background:prog.pct===100?T.tagGreen.text:"rgba(55,53,47,0.45)",borderRadius:99 }} />
+            </div>
+            <span style={{ fontSize:10,color:T.pageTer,fontFamily:"monospace" }}>{prog.pct}%</span>
+          </div>
+        )}
+
+        {/* Fin — toujours affiché */}
+        <div style={{ ...cs(scByKey["end"].sw),justifyContent:"center",padding:"0 4px",borderRight:`1px solid ${T.pageBdr}`,cursor:"pointer" }}
+          title="Double-clic pour modifier"
+          onDoubleClick={onEdit}>
+          <span style={{ fontSize:11,fontFamily:"monospace",color:T.pageSub }}>{fmt(task.end)}</span>
+        </div>
+
       </div>
       {/* Zone barre */}
       <div style={{ flex:1,overflow:"hidden" }}>
@@ -3120,7 +3102,7 @@ function TaskDrawer({ task, candidats, metaCache, candidatCountByKey, conflictTy
 // ═══════════════════════════════════════════════════════════════
 // CALENDAR VIEW — À placer JUSTE AVANT function GanttView
 // ═══════════════════════════════════════════════════════════════
-function CalendarView({ displayTasksFiltered, metaCache, candidatCountByKey, conflictTypesMap, liveConflictTaskKeys, wd, sh, vacs, onEditTask, candidats  }) {
+function CalendarView({ displayTasksFiltered, metaCache, candidatCountByKey, conflictTypesMap, liveConflictTaskKeys, wd, sh, vacs, onEditTask, candidats ,ws,windowW = 1200  }) {
   const today = new Date();
   const [viewYear,  setViewYear]  = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
@@ -3197,6 +3179,7 @@ const [selectedTask, setSelectedTask] = useState(null);
           candidats={candidats}
           tasks={displayTasksFiltered}
           onClose={() => setPrintDoc(null)}
+          ws={ws}
         />
       )}
       {/* Drawer */}
@@ -3270,7 +3253,7 @@ const [selectedTask, setSelectedTask] = useState(null);
               else if (isWE)   cellBg = "rgba(55,53,47,0.025)";
 
               return (
-                <div key={di} style={{ minHeight:115,padding:"5px 4px 4px",background:cellBg,borderRight:di<6?`1px solid ${T.pageBdr}`:"none",position:"relative" }}>
+                <div key={di} style={{ minHeight: windowW < 480 ? 60 : windowW < 768 ? 80 : 115,padding: windowW < 768 ? "3px 2px 2px" : "5px 4px 4px",background:cellBg,borderRight:di<6?`1px solid ${T.pageBdr}`:"none",position:"relative" }}>
                   {/* Numéro */}
                   <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3,paddingRight:2 }}>
                     <span style={{ width:22,height:22,display:"inline-flex",alignItems:"center",justifyContent:"center",borderRadius:"50%",fontSize:12,fontWeight:isToday?700:400,background:isToday?"#37352f":"transparent",color:isToday?"#fff":!cur?T.pageTer:isWE?"rgba(212,76,71,0.35)":T.pageText,flexShrink:0 }}>
@@ -3446,7 +3429,7 @@ function GanttView({
   tasks, setTasks,
   candidats = [], setCandidats, setDocuments,
   wsId, showToast,
-  wsWorkingDays, wsSkipHolidays, wsVacances, onUpdateWs,
+  wsWorkingDays, wsSkipHolidays, wsVacances, onUpdateWs, ws
 }) {
   const { wd, setWd, sh, setSh, vacs, setVacs } = usePlanningSettings(wsId, wsWorkingDays, wsSkipHolidays, wsVacances, onUpdateWs);
 
@@ -3469,6 +3452,17 @@ const [pendingUpdate, setPendingUpdate] = useState(null);
 
   // ── Mode d'affichage
   const [viewMode, setViewMode] = useState("gantt"); // "gantt" | "calendar"
+
+  // Ajouter ce hook en haut du composant GanttView
+const [windowW, setWindowW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+useEffect(() => {
+  const handler = () => setWindowW(window.innerWidth);
+  window.addEventListener("resize", handler);
+  return () => window.removeEventListener("resize", handler);
+}, []);
+
+const isMobile  = windowW < 768;
+const isTablet  = windowW < 1024;
 
   const contRef  = useRef(null), hdrRef = useRef(null), scrRef = useRef(null), listRef = useRef(null);
   const scrollLeftRef = useRef(0), scrollRafRef = useRef(null);
@@ -3538,8 +3532,24 @@ const [pendingUpdate, setPendingUpdate] = useState(null);
 
   const avail = cw>0?Math.min(cw*0.44,GTOT):GTOT;
   const scale = cw>0?avail/GTOT:1;
-  const SC    = useMemo(()=>GCOLS.map(c=>({...c,sw:Math.max(Math.round(c.w*scale),c.key==="group"?140:c.key==="groupe"?40:c.key==="count"?40:c.key==="wdays"?40:c.key==="prog"?60:66)})),[scale]);
-  const cs    = useCallback(w=>({width:w,minWidth:w,maxWidth:w,boxSizing:"border-box",flexShrink:0,display:"flex",alignItems:"center",overflow:"hidden",borderRight:`1px solid ${T.pageBdr}`}),[]);
+const SC = useMemo(() => GCOLS
+  .filter(col => {
+    if (isMobile  && ["wdays","prog"].includes(col.key)) return false;
+    if (isTablet  && col.key === "prog") return false;
+    return true;
+  })
+  .map(c => ({
+    ...c,
+    sw: Math.max(
+      Math.round(c.w * scale),
+      c.key === "group"  ? (isMobile ? 110 : 140) :
+      c.key === "groupe" ? 36 :
+      c.key === "count"  ? 36 :
+      c.key === "wdays"  ? 36 :
+      c.key === "prog"   ? 50 : 60
+    )
+  })), [scale, isMobile, isTablet]);
+    const cs    = useCallback(w=>({width:w,minWidth:w,maxWidth:w,boxSizing:"border-box",flexShrink:0,display:"flex",alignItems:"center",overflow:"hidden",borderRight:`1px solid ${T.pageBdr}`}),[]);
 
   const weekHdrs = useMemo(()=>{
     const r=[]; let wi=0;
@@ -3555,7 +3565,6 @@ const [pendingUpdate, setPendingUpdate] = useState(null);
     return m;
   },[candidats]);
 
-  
 
   // ── 1. displayTasks
   const displayTasks = useMemo(()=>{
@@ -3820,13 +3829,30 @@ const confirmUpdate = useCallback(async () => {
   // RENDER
   // ══════════════════════════════════════════════════════════════
   return (
-    <div ref={contRef} style={{padding:"30px 40px 80px",width:"100%",boxSizing:"border-box"}}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse-conflict{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
+    <div ref={contRef} className="gantt-outer" style={{padding:"30px 40px 80px",width:"100%",boxSizing:"border-box"}}>
+<style>{`
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes pulse-conflict{0%,100%{opacity:1}50%{opacity:0.4}}
 
+  /* ── Responsive Gantt ── */
+  @media (max-width: 768px) {
+    .gantt-outer { padding: 16px 12px 60px !important; }
+    .gantt-title { font-size: 22px !important; }
+    .gantt-subtitle { font-size: 11px !important; }
+    .gantt-toolbar { gap: 4px !important; flex-wrap: wrap !important; }
+    .gantt-toolbar-right { margin-left: 0 !important; width: 100% !important; justify-content: flex-end; display: flex; gap: 6px; }
+    .gantt-hide-mobile { display: none !important; }
+    .gantt-col-label { font-size: 8px !important; }
+  }
+  @media (max-width: 480px) {
+    .gantt-outer { padding: 12px 8px 60px !important; }
+    .gantt-title { font-size: 18px !important; }
+  }
+`}</style>
       {/* Titre */}
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
         <CalendarRange style={{width:24,height:24,color:T.pageSub,strokeWidth:1.6}}/>
-        <h1 style={{fontSize:32,fontWeight:800,color:T.pageText,letterSpacing:"-0.04em",margin:0}}>Planification</h1>
+        <h1 className="gantt-title" style={{fontSize:32,fontWeight:800,color:T.pageText,letterSpacing:"-0.04em",margin:0}}>Planification</h1>
       </div>
       <div style={{fontSize:13,color:T.pageSub,marginBottom:16}}>
         {displayTasksFiltered.length!==displayTasks.length
@@ -3837,7 +3863,7 @@ const confirmUpdate = useCallback(async () => {
       </div>
 
       {/* ── Barre outils ── */}
-      <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:12,flexWrap:"wrap"}}>
+      <div className="gantt-toolbar" style={{display:"flex",alignItems:"center",gap:4,marginBottom:12,flexWrap:"wrap"}}>
 
         {/* Toggle Gantt / Calendrier */}
         <div style={{display:"flex",border:`1px solid ${T.pageBdr}`,borderRadius:4,overflow:"hidden"}}>
@@ -3873,19 +3899,21 @@ const confirmUpdate = useCallback(async () => {
         {viewMode==="gantt"&&(
           <div style={{display:"flex",border:`1px solid ${T.pageBdr}`,borderRadius:4,overflow:"hidden"}}>
             <button style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",border:"none",borderRight:`1px solid ${T.pageBdr}`,background:"transparent",cursor:"pointer",color:T.pageSub}} onClick={()=>scrollBy(-zoom.days)}><ChevronLeft style={{width:12,height:12}}/></button>
-            <button style={{height:26,padding:"0 8px",border:"none",background:"transparent",cursor:"pointer",fontSize:12,color:T.pageSub,fontFamily:"inherit"}} onClick={goTodayGantt}>Aujourd'hui</button>
+            <button style={{height:26,padding:"0 8px",border:"none",background:"transparent",cursor:"pointer",fontSize:12,color:T.pageSub,fontFamily:"inherit"}} onClick={goTodayGantt} className={isMobile ? "gantt-hide-mobile" : ""}>Aujourd'hui</button>
             <button style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",border:"none",borderLeft:`1px solid ${T.pageBdr}`,background:"transparent",cursor:"pointer",color:T.pageSub}} onClick={()=>scrollBy(zoom.days)}><ChevronRight style={{width:12,height:12}}/></button>
           </div>
         )}
         {viewMode==="gantt"&&(
           <div style={{display:"flex",border:`1px solid ${T.pageBdr}`,borderRadius:4,overflow:"hidden"}}>
             <button style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",border:"none",borderRight:`1px solid ${T.pageBdr}`,background:"transparent",cursor:"pointer",color:T.pageSub,opacity:zi===0?0.3:1}} onClick={()=>setZi(z=>Math.max(0,z-1))} disabled={zi===0}><ZoomIn style={{width:12,height:12}}/></button>
-            <span style={{padding:"0 8px",lineHeight:"26px",fontSize:12,color:T.pageSub}}>{zoom.label}</span>
-            <button style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",border:"none",borderLeft:`1px solid ${T.pageBdr}`,background:"transparent",cursor:"pointer",color:T.pageSub,opacity:zi===ZOOMS.length-1?0.3:1}} onClick={()=>setZi(z=>Math.min(ZOOMS.length-1,z+1))} disabled={zi===ZOOMS.length-1}><ZoomOut style={{width:12,height:12}}/></button>
+<span style={{padding:"0 8px", lineHeight:"26px", fontSize:12, color:T.pageSub}}>
+  {isMobile ? zoom.label.slice(0,3) : zoom.label}
+</span>            
+<button style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",border:"none",borderLeft:`1px solid ${T.pageBdr}`,background:"transparent",cursor:"pointer",color:T.pageSub,opacity:zi===ZOOMS.length-1?0.3:1}} onClick={()=>setZi(z=>Math.min(ZOOMS.length-1,z+1))} disabled={zi===ZOOMS.length-1}><ZoomOut style={{width:12,height:12}}/></button>
           </div>
         )}
 
-        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6}}>
+        <div className="gantt-toolbar-right" style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6}}>
           <button onClick={exportGantt} disabled={displayTasks.length===0} style={{display:"flex",alignItems:"center",gap:5,height:26,padding:"0 10px",fontSize:13,fontWeight:500,color:T.pageText,background:"transparent",border:`1px solid rgba(55,53,47,0.25)`,borderRadius:4,cursor:displayTasks.length===0?"not-allowed":"pointer",fontFamily:"inherit",opacity:displayTasks.length===0?0.4:1}}>
             <FileUp style={{width:13,height:13}}/> Exporter Excel
           </button>
@@ -3951,6 +3979,8 @@ const confirmUpdate = useCallback(async () => {
           liveConflictTaskKeys={liveConflictTaskKeys}
           wd={wd} sh={sh} vacs={vacs}
           candidats={candidats}
+          ws={ws}
+          windowW={windowW}
           onEditTask={(task) => {
     setViewMode("gantt");        // ← bascule vers Gantt
     setTimeout(() => {
@@ -4200,62 +4230,6 @@ function resolveConflictsAuto(result, dWd, dSh, dV) {
   const remaining = detectScheduleConflictsV3(cur, dWd, dSh, dV).filter(cf => cf.conflicts.some(c => c.type==="overlap"));
   return { result: cur, resolutions: deduped, remainingCount: remaining.length };
 }
-
-// ConflictAlert + ResolutionSummary (pour ImportWizard, inchangés)
-function ConflictAlert({ conflicts, onDismiss, onAutoResolve, resolving }) {
-  const [expanded, setExpanded] = useState(false); const shown = expanded ? conflicts : conflicts.slice(0, 3);
-  return (
-    <div style={{ border: "1.5px solid rgba(212,76,71,0.4)", borderRadius: 6, background: "rgba(253,224,220,0.35)", overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 18px", borderBottom: "1px solid rgba(212,76,71,0.15)" }}>
-        <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: "rgba(212,76,71,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}><AlertCircle style={{ width: 18, height: 18, color: "#d44c47" }} /></div>
-        <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 700, color: "#d44c47", marginBottom: 3 }}>{conflicts.length} conflit{conflicts.length > 1 ? "s" : ""} de planning détecté{conflicts.length > 1 ? "s" : ""}</div><div style={{ fontSize: 12, color: "#9b3c3c", lineHeight: 1.6 }}>{conflicts.length === 1 ? "Un candidat est inscrit à plusieurs formations dont les périodes se chevauchent." : `${conflicts.length} candidats avec des formations se chevauchant.`}</div></div>
-        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-          {onAutoResolve && <button onClick={onAutoResolve} disabled={resolving} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", opacity: resolving ? 0.6 : 1 }}>{resolving ? <Spinner size={11} color="#fff" /> : <Wand2 style={{ width: 11, height: 11 }} />}{resolving ? "Résolution…" : "Résoudre auto"}</button>}
-          {onDismiss && <button onClick={onDismiss} style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", color: "#d44c47", flexShrink: 0 }}><X style={{ width: 13, height: 13 }} /></button>}
-        </div>
-      </div>
-      {shown.map((cf, i) => (
-        <div key={i} style={{ padding: "10px 18px 10px 62px", borderBottom: i < shown.length - 1 ? "1px solid rgba(212,76,71,0.1)" : "none", background: i % 2 === 0 ? "transparent" : "rgba(212,76,71,0.03)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-            <div style={{ width: 22, height: 22, borderRadius: 4, background: "rgba(212,76,71,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "#d44c47", flexShrink: 0 }}>{cf.nom?.charAt(0)}{cf.prenom?.charAt(0)}</div>
-            <span style={{ fontSize: 13, fontWeight: 600, color: T.pageText }}>{cf.nom} {cf.prenom}</span>
-            {cf.matricule && <span style={{ fontSize: 10, color: T.pageTer, fontFamily: "monospace" }}>{cf.matricule}</span>}
-            <span style={{ fontSize: 10, fontWeight: 600, color: "#d44c47", background: "rgba(212,76,71,0.12)", padding: "1px 6px", borderRadius: 3 }}>{cf.sessions.length} formations en conflit</span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{cf.sessions.map((s, si) => { const pal = grpTag(s.theme); return (<div key={si} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 10px", borderRadius: 4, background: "rgba(255,255,255,0.7)", border: "1px solid rgba(212,76,71,0.15)" }}><div style={{ width: 6, height: 6, borderRadius: 2, background: pal.text, flexShrink: 0 }} /><span style={{ fontSize: 12, fontWeight: 600, color: pal.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.theme}</span><span style={{ fontSize: 11, color: T.pageSub }}>Grp {s.groupe}</span><span style={{ fontSize: 11, fontFamily: "monospace", color: T.pageSub, background: "rgba(55,53,47,0.05)", padding: "1px 6px", borderRadius: 3 }}>{fmt(s.start)} → {fmt(s.end)}</span></div>); })}</div>
-        </div>
-      ))}
-      {conflicts.length > 3 && <button onClick={() => setExpanded(v => !v)} style={{ width: "100%", padding: "8px 18px", border: "none", borderTop: "1px solid rgba(212,76,71,0.15)", background: "transparent", cursor: "pointer", fontSize: 12, color: "#d44c47", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>{expanded ? <><ChevronDown style={{ width: 12, height: 12, transform: "rotate(180deg)" }} /> Réduire</> : <><ChevronDown style={{ width: 12, height: 12 }} /> Voir {conflicts.length - 3} de plus</>}</button>}
-    </div>
-  );
-}
-
-function ResolutionSummary({ resolutions, onClose }) {
-  const [expanded, setExpanded] = useState(false);
-  const shown = expanded ? resolutions : resolutions.slice(0, 5);
-  return (
-    <div style={{ border: "1.5px solid rgba(51,126,169,0.4)", borderRadius: 6, background: "rgba(220,235,245,0.35)", overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderBottom: "1px solid rgba(51,126,169,0.15)" }}>
-        <div style={{ width: 28, height: 28, borderRadius: 6, flexShrink: 0, background: "rgba(51,126,169,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}><CheckCheck style={{ width: 15, height: 15, color: "#337ea9" }} /></div>
-        <div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 700, color: "#337ea9" }}>{resolutions.length} conflit{resolutions.length > 1 ? "s" : ""} résolus automatiquement</div><div style={{ fontSize: 11, color: "#1a5a8a" }}>Changements de groupe ou décalages de dates appliqués.</div></div>
-        <button onClick={onClose} style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", color: "#337ea9" }}><X style={{ width: 12, height: 12 }} /></button>
-      </div>
-      {shown.map((r, i) => (
-        <div key={i} style={{ padding: "7px 18px 7px 58px", borderBottom: i < shown.length - 1 ? "1px solid rgba(51,126,169,0.1)" : "none", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ width: 20, height: 20, borderRadius: 3, background: "rgba(51,126,169,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{r.type === "groupe" ? <Shuffle style={{ width: 10, height: 10, color: "#337ea9" }} /> : <CalendarRange style={{ width: 10, height: 10, color: "#337ea9" }} />}</div>
-          <span style={{ fontSize: 12, fontWeight: 600, color: T.pageText }}>{r.nom} {r.prenom}</span>
-          {r.matricule && <span style={{ fontSize: 10, color: T.pageTer, fontFamily: "monospace" }}>{r.matricule}</span>}
-          <span style={{ fontSize: 11, color: T.pageSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>{r.theme}</span>
-          <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#9b3c3c", background: "rgba(212,76,71,0.07)", padding: "1px 6px", borderRadius: 3, whiteSpace: "nowrap" }}>{r.from}</span>
-          <ArrowRight style={{ width: 10, height: 10, color: T.pageTer, flexShrink: 0 }} />
-          <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#2d6a4f", background: "rgba(68,131,97,0.1)", padding: "1px 6px", borderRadius: 3, whiteSpace: "nowrap" }}>{r.to}</span>
-        </div>
-      ))}
-      {resolutions.length > 5 && <button onClick={() => setExpanded(v => !v)} style={{ width: "100%", padding: "6px", border: "none", borderTop: "1px solid rgba(51,126,169,0.15)", background: "transparent", cursor: "pointer", fontSize: 11, color: "#337ea9", fontFamily: "inherit" }}>{expanded ? "Réduire" : "Voir tout"}</button>}
-    </div>
-  );
-}
-
 
 
 /* ===========================================================
@@ -6912,361 +6886,535 @@ const handleSafeClose = () => {
   );
 }
 
-function CandidatsView({currentUser, candidats, setCandidats, tasks, setTasks, ws, wsId, showToast, setDocuments, onUpdateWs  }) {
-  const [modal, setModal] = useState(null);
-  const [viewMode, setViewMode] = useState("liste"); const [filterTheme, setFilterTheme] = useState("Tous");
-  const [filterGroupe, setFilterGroupe] = useState("Tous"); const [search, setSearch] = useState("");
-  const [showFilters, setShowFilters] = useState(false); const [showColPicker, setShowColPicker] = useState(false);
-  const [visibleExtraCols, setVisibleExtraCols] = useState(new Set()); const [colPickerInit, setColPickerInit] = useState(false);
-  const [saving, setSaving] = useState(false);
-  // PERF D: virtualisation de la liste candidats
-  const [candScrollTop, setCandScrollTop] = useState(0);
+function CandidatsView({ currentUser, candidats, setCandidats, tasks, setTasks, ws, wsId, showToast, setDocuments, onUpdateWs }) {
+  // ── RESPONSIVE ──
+  const { w } = useWindowSize();
+  const isMobile = w < 640;
+  const isTablet  = w >= 640 && w < 1024;
+
+  const [modal,            setModal]            = useState(null);
+  const [viewMode,         setViewMode]         = useState("liste");
+  const [filterTheme,      setFilterTheme]      = useState("Tous");
+  const [filterGroupe,     setFilterGroupe]     = useState("Tous");
+  const [search,           setSearch]           = useState("");
+  const [showFilters,      setShowFilters]      = useState(false);
+  const [showColPicker,    setShowColPicker]    = useState(false);
+  const [visibleExtraCols, setVisibleExtraCols] = useState(new Set());
+  const [colPickerInit,    setColPickerInit]    = useState(false);
+  const [saving,           setSaving]           = useState(false);
+  const [candScrollTop,    setCandScrollTop]    = useState(0);
+  const [multiImportOpen,  setMultiImportOpen]  = useState(false);
   const colPickerRef = useRef(null);
-  const [multiImportOpen, setMultiImportOpen] = useState(false);
 
+  // ── Export Excel ──────────────────────────────────────────────
   const exportCandidats = () => {
-  // 1. Pré-calcul du nombre de personnes par groupe (pour la formule du coût)
-  const groupCounts = {};
-  candidats.forEach(cand => {
-    const k = `${cand.theme}||${cand.groupe}`;
-    groupCounts[k] = (groupCounts[k] || 0) + 1;
-  });
-
-  // 2. Configuration des colonnes de base
-  const baseColsConfig = [
-    { key: "matricule", label: "Matricule" },
-    { key: "nom",       label: "Nom" },
-    { key: "prenom",    label: "Prénom" },
-    { key: "theme",     label: "Thème / Formation" },
-    { key: "jours",     label: "Durée (Jours)" },
-    { key: "slot",      label: "Créneau" }, // <-- Colonne pour AM/PM
-    { key: "groupe",    label: "Groupe" },
-    { key: "dateDebut", label: "Date Début" },
-    { key: "dateFin",   label: "Date Fin" },
-    { key: "statut",    label: "Statut" },
-  ];
-
-  const selectedExtraKeys = Array.from(visibleExtraCols);
-
-  // ==========================================
-  // DEBUT DU MAP (TRAITEMENT LIGNE PAR LIGNE)
-  // ==========================================
-  const data = filtered.map(c => {
-    const row = {};
-
-    // A. RECHERCHE DE LA TÂCHE GANTT POUR LE CRÉNEAU (SLOT)
-    // On cherche la tâche correspondante pour voir si elle est AM ou PM
-    const assocTask = tasks.find(t => 
-    (t.group === c.theme) && String(t.groupe) === String(c.groupe)
-  );
-  
-  // On récupère le slot soit du candidat, soit de la tâche associée
-  const rawSlot = assocTask?.slot || c.slot || "";
-  const isHalf = assocTask?.halfDay || c.halfDay;
-
-  // --- LOGIQUE CORRIGÉE ---
-  let slotLabel = "Journée entière"; 
-  if (isHalf) {
-    if (rawSlot === "matin") slotLabel = "AM";
-    else if (rawSlot === "après-midi") slotLabel = "PM";
-    else slotLabel = "AM"; 
-  }
-
-
-    // B. CALCUL DU COÛT SELON VOTRE FORMULE
-    const key = `${c.theme}||${c.groupe}`;
-    const nbrPersonnes = groupCounts[key] || 1;
-    const nbrJours = c.jours || 0;
-    const groupCostRaw = c.extraData?.cout || c.cout || "0";
-    const groupCost = parseFloat(String(groupCostRaw).replace(/\s/g, '').replace(',', '.')) || 0;
-    const coutIndividuel = nbrPersonnes > 0 ? (groupCost * nbrJours) / nbrPersonnes : 0;
-
-    // C. REMPLISSAGE DES COLONNES DE BASE
-    baseColsConfig.forEach(col => {
-      let val = c[col.key] || "";
-
-      // Gestion spécifique des dates (on prend celles du Gantt en priorité)
-      if (col.key === "dateDebut") val = assocTask?.start || c.dateDebut || "";
-      if (col.key === "dateFin")   val = assocTask?.end || c.dateFin || "";
-      if (col.key === "dateDebut" || col.key === "dateFin") val = fmt(val);
-
-      // Gestion spécifique du créneau AM/PM
-      if (col.key === "slot") val = slotLabel; 
-
-
-      row[col.label] = val;
+    const groupCounts = {};
+    candidats.forEach(cand => { const k = `${cand.theme}||${cand.groupe}`; groupCounts[k] = (groupCounts[k] || 0) + 1; });
+    const baseColsConfig = [
+      { key:"matricule", label:"Matricule" }, { key:"nom", label:"Nom" }, { key:"prenom", label:"Prénom" },
+      { key:"theme", label:"Thème / Formation" }, { key:"jours", label:"Durée (Jours)" },
+      { key:"slot", label:"Créneau" }, { key:"groupe", label:"Groupe" },
+      { key:"dateDebut", label:"Date Début" }, { key:"dateFin", label:"Date Fin" }, { key:"statut", label:"Statut" },
+    ];
+    const selectedExtraKeys = Array.from(visibleExtraCols);
+    const data = filtered.map(c => {
+      const row = {};
+      const assocTask = tasks.find(t => (t.group === c.theme) && String(t.groupe) === String(c.groupe));
+      const rawSlot = assocTask?.slot || c.slot || "";
+      const isHalf  = assocTask?.halfDay || c.halfDay;
+      let slotLabel = "Journée entière";
+      if (isHalf) { if (rawSlot === "matin") slotLabel = "AM"; else if (rawSlot === "après-midi") slotLabel = "PM"; else slotLabel = "AM"; }
+      const key = `${c.theme}||${c.groupe}`;
+      const nbrPersonnes = groupCounts[key] || 1;
+      const nbrJours = c.jours || 0;
+      const groupCostRaw = c.extraData?.cout || c.cout || "0";
+      const groupCost = parseFloat(String(groupCostRaw).replace(/\s/g,"").replace(",",".")) || 0;
+      const coutIndividuel = nbrPersonnes > 0 ? (groupCost * nbrJours) / nbrPersonnes : 0;
+      baseColsConfig.forEach(col => {
+        let val = c[col.key] || "";
+        if (col.key === "dateDebut") val = assocTask?.start || c.dateDebut || "";
+        if (col.key === "dateFin")   val = assocTask?.end   || c.dateFin   || "";
+        if (col.key === "dateDebut" || col.key === "dateFin") val = fmt(val);
+        if (col.key === "slot") val = slotLabel;
+        row[col.label] = val;
+      });
+      row["Coût Individuel (MAD)"] = Math.round(coutIndividuel * 100) / 100;
+      selectedExtraKeys.forEach(extraKey => { if (extraKey.toLowerCase() !== "cout") row[extraKey] = c.extraData?.[extraKey] || ""; });
+      return row;
     });
+    const sheet = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Export_Candidats");
+    XLSX.writeFile(wb, `Export_Candidats_${new Date().toLocaleDateString().replace(/\//g,"-")}.xlsx`);
+    showToast(`${data.length} candidats exportés`, "success");
+  };
 
-    // D. INSERTION DU COÛT CALCULÉ
-    row["Coût Individuel (MAD)"] = Math.round(coutIndividuel * 100) / 100;
+  useEffect(() => {
+    if (!showColPicker) return;
+    const h = e => { if (colPickerRef.current && !colPickerRef.current.contains(e.target)) setShowColPicker(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showColPicker]);
 
-    // E. INSERTION DES COLONNES SUPPLÉMENTAIRES (Cochées dans l'interface)
-    selectedExtraKeys.forEach(extraKey => {
-      if (extraKey.toLowerCase() !== "cout") { // On évite de doubler le coût
-        row[extraKey] = c.extraData?.[extraKey] || "";
-      }
-    });
-
-    return row;
-  });
-  // ==========================================
-  // FIN DU MAP
-  // ==========================================
-
-  // 4. Génération effective du fichier Excel
-  const sheet = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, sheet, "Export_Candidats");
-  XLSX.writeFile(wb, `Export_Candidats_${new Date().toLocaleDateString().replace(/\//g, '-')}.xlsx`);
-  showToast(`${data.length} candidats exportés`, "success");
-};
-
-  useEffect(() => { if (!showColPicker) return; const h = e => { if (colPickerRef.current && !colPickerRef.current.contains(e.target)) setShowColPicker(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [showColPicker]);
   const hasFormation = useMemo(() => candidats.some(c => c.theme), [candidats]);
-  const allThemes = useMemo(() => [...new Set(candidats.filter(c => c.theme).map(c => c.theme))].sort(), [candidats]);
-  const allGroupes = useMemo(() => [...new Set(candidats.filter(c => c.groupe).map(c => String(c.groupe)))].sort((a, b) => Number(a) - Number(b)), [candidats]);
+  const allThemes    = useMemo(() => [...new Set(candidats.filter(c => c.theme).map(c => c.theme))].sort(), [candidats]);
+  const allGroupes   = useMemo(() => [...new Set(candidats.filter(c => c.groupe).map(c => String(c.groupe)))].sort((a,b) => Number(a)-Number(b)), [candidats]);
 
   const filtered = useMemo(() => {
     const raw = candidats.filter(c => {
-      const mT = filterTheme === "Tous" || c.theme === filterTheme;
+      const mT = filterTheme  === "Tous" || c.theme         === filterTheme;
       const mG = filterGroupe === "Tous" || String(c.groupe) === filterGroupe;
-      const mS = !search || `${c.nom} ${c.prenom} ${c.poste || ""} ${c.theme || ""}`.toLowerCase().includes(search.toLowerCase());
+      const mS = !search || `${c.nom} ${c.prenom} ${c.poste||""} ${c.theme||""}`.toLowerCase().includes(search.toLowerCase());
       return mT && mG && mS;
     });
     const seen = new Map();
     raw.forEach(c => {
-      const key = `${String(c.nom || "").trim().toLowerCase()}__${String(c.prenom || "").trim().toLowerCase()}__${c.theme || ""}__${c.groupe || ""}`;
+      const key = `${String(c.nom||"").trim().toLowerCase()}__${String(c.prenom||"").trim().toLowerCase()}__${c.theme||""}__${c.groupe||""}`;
       if (!seen.has(key)) seen.set(key, c);
     });
     return Array.from(seen.values());
   }, [candidats, filterTheme, filterGroupe, search]);
 
-  /* -- COMPTEURS UNIQUES PAR PERSONNE (matricule > nom+prénom) -- */
   const uniqueCandidatsCount = useMemo(() => {
     const seen = new Set();
-    candidats.forEach(c => {
-      const mat = String(c.matricule || "").trim();
-      const validMat = mat.length > 3 && mat.toLowerCase() !== "en cours de recrutement";
-      const key = validMat
-        ? mat.toLowerCase()
-        : `${String(c.nom || "").trim().toLowerCase()}__${String(c.prenom || "").trim().toLowerCase()}`;
-      seen.add(key);
-    });
+    candidats.forEach(c => { const mat=String(c.matricule||"").trim(); const validMat=mat.length>3&&mat.toLowerCase()!=="en cours de recrutement"; seen.add(validMat?mat.toLowerCase():`${String(c.nom||"").trim().toLowerCase()}__${String(c.prenom||"").trim().toLowerCase()}`); });
     return seen.size;
   }, [candidats]);
 
   const uniqueFilteredCount = useMemo(() => {
     const seen = new Set();
-    filtered.forEach(c => {
-      const mat = String(c.matricule || "").trim();
-      const validMat = mat.length > 3 && mat.toLowerCase() !== "en cours de recrutement";
-      const key = validMat
-        ? mat.toLowerCase()
-        : `${String(c.nom || "").trim().toLowerCase()}__${String(c.prenom || "").trim().toLowerCase()}`;
-      seen.add(key);
-    });
+    filtered.forEach(c => { const mat=String(c.matricule||"").trim(); const validMat=mat.length>3&&mat.toLowerCase()!=="en cours de recrutement"; seen.add(validMat?mat.toLowerCase():`${String(c.nom||"").trim().toLowerCase()}__${String(c.prenom||"").trim().toLowerCase()}`); });
     return seen.size;
   }, [filtered]);
-
 
   const save = async f => {
     setSaving(true);
     try {
-      if (modal === "new") { const body = { ...f, createdAt: new Date().toISOString() }; const created = norm(await apiFetch(`/workspaces/${wsId}/candidats`, { method: "POST", body })); setCandidats(p => { const n = [...p, created]; syncCache(n); return n; }); }
-      else { const updated = norm(await apiFetch(`/candidats/${modal.id}`, { method: "PUT", body: f })); setCandidats(p => { const n = p.map(c => c.id === modal.id ? updated : c); syncCache(n); return n; }); }
-    } catch (e) { showToast("Erreur : " + e.message); }
+      if (modal === "new") { const body={...f,createdAt:new Date().toISOString()}; const created=norm(await apiFetch(`/workspaces/${wsId}/candidats`,{method:"POST",body})); setCandidats(p=>{const n=[...p,created];syncCache(n);return n;}); }
+      else { const updated=norm(await apiFetch(`/candidats/${modal.id}`,{method:"PUT",body:f})); setCandidats(p=>{const n=p.map(c=>c.id===modal.id?updated:c);syncCache(n);return n;}); }
+    } catch(e) { showToast("Erreur : "+e.message); }
     setSaving(false); setModal(null);
   };
-  const delCand = async id => {
-    setCandidats(p => { const n = p.filter(c => c.id !== id); syncCache(n); return n; });
-    try { await apiFetch(`/candidats/${id}`, { method: "DELETE" }); } catch (e) { showToast("Erreur suppression : " + e.message); }
-  };
-  const formationGroups = useMemo(() => { const fg = {}; filtered.filter(c => c.theme).forEach(c => { const key = `${c.theme}||${c.groupe || 1}`; if (!fg[key]) fg[key] = { theme: c.theme, groupe: c.groupe || 1, jours: c.jours || 0, start: c.dateDebut || "", end: c.dateFin || "", cands: [] }; fg[key].cands.push(c); }); return fg; }, [filtered]);
-  const activeFilters = (filterTheme !== "Tous" ? 1 : 0) + (filterGroupe !== "Tous" ? 1 : 0);
-  const filterBtn = (active, onClick, children) => (<button onClick={onClick} style={{ padding: "3px 10px", borderRadius: 4, fontSize: 13, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${active ? "rgba(55,53,47,0.3)" : T.pageBdr}`, background: active ? "rgba(55,53,47,0.07)" : "transparent", color: active ? T.pageText : T.pageSub, fontWeight: active ? 600 : 400, display: "flex", gap: 5, alignItems: "center", whiteSpace: "nowrap" }}>{children}</button>);
-  const canImport = !currentUser?.parentId || currentUser?.permissions?.canImportExcel;
-  return (
-    <div style={{ padding: "30px 40px 80px", width: "100%", boxSizing: "border-box" }}>
-      {modal && <CModal item={modal === "new" ? null : modal} onClose={() => setModal(null)} onSave={save} />}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}><Users style={{ width: 24, height: 24, color: T.pageSub, strokeWidth: 1.6 }} /><h1 style={{ fontSize: 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em", margin: 0 }}>Candidats</h1></div>
 
-      {/* -- SOUS-TITRE : compteurs basés sur personnes uniques -- */}
-      <div style={{ fontSize: 13, color: T.pageSub, marginBottom: 24 }}>
-        <span style={{ fontWeight: 600, color: T.pageText }}>{uniqueFilteredCount}</span>
-        {uniqueFilteredCount !== uniqueCandidatsCount && <span style={{ color: T.pageTer }}> / {uniqueCandidatsCount}</span>}
-        {" "}candidat{uniqueCandidatsCount !== 1 ? "s" : ""}
-        {hasFormation && <> · {allThemes.length} thème{allThemes.length > 1 ? "s" : ""}</>}
+  const delCand = async id => {
+    setCandidats(p=>{const n=p.filter(c=>c.id!==id);syncCache(n);return n;});
+    try { await apiFetch(`/candidats/${id}`,{method:"DELETE"}); } catch(e) { showToast("Erreur suppression : "+e.message); }
+  };
+
+  const formationGroups = useMemo(() => {
+    const fg={};
+    filtered.filter(c=>c.theme).forEach(c=>{
+      const key=`${c.theme}||${c.groupe||1}`;
+      if(!fg[key])fg[key]={theme:c.theme,groupe:c.groupe||1,jours:c.jours||0,start:c.dateDebut||"",end:c.dateFin||"",cands:[]};
+      fg[key].cands.push(c);
+    });
+    return fg;
+  }, [filtered]);
+
+  const activeFilters = (filterTheme !== "Tous" ? 1 : 0) + (filterGroupe !== "Tous" ? 1 : 0);
+
+  const filterBtn = (active, onClick, children) => (
+    <button onClick={onClick} style={{ padding:"3px 10px", borderRadius:4, fontSize:13, cursor:"pointer", fontFamily:"inherit", border:`1px solid ${active?"rgba(55,53,47,0.3)":T.pageBdr}`, background:active?"rgba(55,53,47,0.07)":"transparent", color:active?T.pageText:T.pageSub, fontWeight:active?600:400, display:"flex", gap:5, alignItems:"center", whiteSpace:"nowrap" }}>
+      {children}
+    </button>
+  );
+
+  const canImport = !currentUser?.parentId || currentUser?.permissions?.canImportExcel;
+
+  // ── padding responsive ──
+  const pagePadding = isMobile ? "16px 12px 60px" : isTablet ? "20px 24px 60px" : "30px 40px 80px";
+
+  return (
+    <div style={{ padding: pagePadding, width:"100%", boxSizing:"border-box" }}>
+      {modal && <CModal item={modal==="new"?null:modal} onClose={()=>setModal(null)} onSave={save} />}
+
+      {/* ── Titre ── */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+        <Users style={{ width:isMobile?18:24, height:isMobile?18:24, color:T.pageSub, strokeWidth:1.6 }}/>
+        <h1 style={{ fontSize:isMobile?20:28, fontWeight:800, color:T.pageText, letterSpacing:"-0.04em", margin:0 }}>Candidats</h1>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          {(allThemes.length > 0 || allGroupes.length > 0) && <button onClick={() => setShowFilters(v => !v)} style={{ display: "flex", alignItems: "center", gap: 5, height: 26, padding: "0 10px", fontSize: 13, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${showFilters || activeFilters > 0 ? "rgba(55,53,47,0.3)" : T.pageBdr}`, background: activeFilters > 0 ? `${T.accent}10` : showFilters ? "rgba(55,53,47,0.07)" : "transparent", color: activeFilters > 0 ? T.accent : showFilters ? T.pageText : T.pageSub, fontWeight: showFilters || activeFilters > 0 ? 600 : 400, borderRadius: 4 }}><Search style={{ width: 12, height: 12 }} />Filtres{activeFilters > 0 ? <span style={{ minWidth: 16, height: 16, borderRadius: 8, background: T.accent, color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{activeFilters}</span> : <ChevronDown style={{ width: 11, height: 11, transform: showFilters ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />}</button>}
-          {filterTheme !== "Tous" && <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, background: `${T.accent}12`, border: `1px solid ${T.accent}40`, fontSize: 12, color: T.accent, fontWeight: 500 }}><span style={{ width: 6, height: 6, borderRadius: 2, background: grpTag(filterTheme).text, display: "inline-block" }} /><span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{filterTheme}</span><button onClick={() => setFilterTheme("Tous")} style={{ border: "none", background: "none", cursor: "pointer", color: T.accent, display: "flex", padding: 0, marginLeft: 2 }}><X style={{ width: 10, height: 10 }} /></button></div>}
-          {filterGroupe !== "Tous" && <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, background: `${T.accent}12`, border: `1px solid ${T.accent}40`, fontSize: 12, color: T.accent, fontWeight: 500 }}>Grp {filterGroupe}<button onClick={() => setFilterGroupe("Tous")} style={{ border: "none", background: "none", cursor: "pointer", color: T.accent, display: "flex", padding: 0, marginLeft: 2 }}><X style={{ width: 10, height: 10 }} /></button></div>}
-          {activeFilters > 0 && <button onClick={() => { setFilterTheme("Tous"); setFilterGroupe("Tous"); }} style={{ fontSize: 11, color: T.pageTer, border: "none", background: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>Tout effacer</button>}
-          {hasFormation && <><div style={{ height: 16, width: 1, background: T.pageBdr, margin: "0 2px" }} />{[["liste", "Liste"], ["formation", "Par formation"]].map(([v, l]) => (<button key={v} onClick={() => setViewMode(v)} style={{ padding: "3px 10px", borderRadius: 4, border: `1px solid ${viewMode === v ? "rgba(55,53,47,0.3)" : T.pageBdr}`, background: viewMode === v ? "rgba(55,53,47,0.07)" : "transparent", color: viewMode === v ? T.pageText : T.pageSub, fontSize: 13, fontWeight: viewMode === v ? 600 : 400, cursor: "pointer", fontFamily: "inherit" }}>{l}</button>))}</>}
+      <div style={{ fontSize:13, color:T.pageSub, marginBottom:isMobile?16:24 }}>
+        <span style={{ fontWeight:600, color:T.pageText }}>{uniqueFilteredCount}</span>
+        {uniqueFilteredCount !== uniqueCandidatsCount && <span style={{ color:T.pageTer }}> / {uniqueCandidatsCount}</span>}
+        {" "}candidat{uniqueCandidatsCount!==1?"s":""}
+        {hasFormation && !isMobile && <> · {allThemes.length} thème{allThemes.length>1?"s":""}</>}
+      </div>
+
+      {/* ── Toolbar ── */}
+      <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+
+          {/* Bouton filtres */}
+          {(allThemes.length > 0 || allGroupes.length > 0) && (
+            <button onClick={()=>setShowFilters(v=>!v)} style={{ display:"flex", alignItems:"center", gap:5, height:26, padding:"0 10px", fontSize:13, fontFamily:"inherit", cursor:"pointer", border:`1px solid ${showFilters||activeFilters>0?"rgba(55,53,47,0.3)":T.pageBdr}`, background:activeFilters>0?`${T.accent}10`:showFilters?"rgba(55,53,47,0.07)":"transparent", color:activeFilters>0?T.accent:showFilters?T.pageText:T.pageSub, fontWeight:showFilters||activeFilters>0?600:400, borderRadius:4 }}>
+              <Search style={{ width:12, height:12 }}/>
+              {!isMobile && "Filtres"}
+              {activeFilters > 0 && <span style={{ minWidth:16, height:16, borderRadius:8, background:T.accent, color:"#fff", fontSize:10, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{activeFilters}</span>}
+              {activeFilters === 0 && <ChevronDown style={{ width:11, height:11, transform:showFilters?"rotate(180deg)":"none", transition:"transform 0.15s" }}/>}
+            </button>
+          )}
+
+          {/* Tags filtres actifs */}
+          {filterTheme !== "Tous" && (
+            <div style={{ display:"flex", alignItems:"center", gap:4, padding:"2px 8px", borderRadius:4, background:`${T.accent}12`, border:`1px solid ${T.accent}40`, fontSize:12, color:T.accent, fontWeight:500 }}>
+              <span style={{ width:6, height:6, borderRadius:2, background:grpTag(filterTheme).text, display:"inline-block" }}/>
+              <span style={{ maxWidth:isMobile?80:160, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{filterTheme}</span>
+              <button onClick={()=>setFilterTheme("Tous")} style={{ border:"none", background:"none", cursor:"pointer", color:T.accent, display:"flex", padding:0, marginLeft:2 }}><X style={{ width:10, height:10 }}/></button>
+            </div>
+          )}
+          {filterGroupe !== "Tous" && (
+            <div style={{ display:"flex", alignItems:"center", gap:4, padding:"2px 8px", borderRadius:4, background:`${T.accent}12`, border:`1px solid ${T.accent}40`, fontSize:12, color:T.accent, fontWeight:500 }}>
+              Grp {filterGroupe}
+              <button onClick={()=>setFilterGroupe("Tous")} style={{ border:"none", background:"none", cursor:"pointer", color:T.accent, display:"flex", padding:0, marginLeft:2 }}><X style={{ width:10, height:10 }}/></button>
+            </div>
+          )}
+          {activeFilters > 0 && (
+            <button onClick={()=>{ setFilterTheme("Tous"); setFilterGroupe("Tous"); }} style={{ fontSize:11, color:T.pageTer, border:"none", background:"none", cursor:"pointer", padding:0, textDecoration:"underline" }}>
+              Effacer
+            </button>
+          )}
+
+          {/* Toggle vue */}
+          {hasFormation && <>
+            <div style={{ height:16, width:1, background:T.pageBdr, margin:"0 2px" }}/>
+            {[["liste","Liste"],["formation","Par formation"]].map(([v,l]) => (
+              <button key={v} onClick={()=>setViewMode(v)} style={{ padding:"3px 10px", borderRadius:4, border:`1px solid ${viewMode===v?"rgba(55,53,47,0.3)":T.pageBdr}`, background:viewMode===v?"rgba(55,53,47,0.07)":"transparent", color:viewMode===v?T.pageText:T.pageSub, fontSize:13, fontWeight:viewMode===v?600:400, cursor:"pointer", fontFamily:"inherit" }}>
+                {isMobile ? (v === "liste" ? "Liste" : "Grp") : l}
+              </button>
+            ))}
+          </>}
+
+          {/* Picker colonnes */}
           {viewMode === "liste" && (() => {
-            const allExtraKeys = []; const seen = new Set(); candidats.forEach(c => { if (c.extraData) Object.keys(c.extraData).forEach(k => { if (!seen.has(k) && k !== "__matricule__") { seen.add(k); allExtraKeys.push(k); } }); });
+            const allExtraKeys=[]; const seen=new Set();
+            candidats.forEach(c=>{ if(c.extraData)Object.keys(c.extraData).forEach(k=>{ if(!seen.has(k)&&k!=="__matricule__"){seen.add(k);allExtraKeys.push(k);} }); });
             if (allExtraKeys.length === 0) return null;
             if (!colPickerInit && allExtraKeys.length > 0) { setColPickerInit(true); setVisibleExtraCols(new Set()); }
             const activeCount = allExtraKeys.filter(k => visibleExtraCols.has(k)).length;
-            return (<div ref={colPickerRef} style={{ position: "relative" }}><button onClick={() => setShowColPicker(v => !v)} style={{ display: "flex", alignItems: "center", gap: 5, height: 26, padding: "0 10px", fontSize: 13, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${showColPicker || activeCount > 0 ? "rgba(55,53,47,0.3)" : T.pageBdr}`, background: showColPicker ? "rgba(55,53,47,0.07)" : "transparent", color: showColPicker ? T.pageText : T.pageSub, borderRadius: 4 }}><Settings style={{ width: 12, height: 12 }} />Colonnes{activeCount > 0 && <span style={{ minWidth: 16, height: 16, borderRadius: 8, background: T.accent, color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{activeCount}</span>}<ChevronDown style={{ width: 11, height: 11, transform: showColPicker ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} /></button>
-              {showColPicker && <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 200, background: "#fff", borderRadius: 6, border: `1px solid ${T.pageBdr}`, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", minWidth: 260, overflow: "hidden" }}>
-                <div style={{ padding: "10px 14px 8px", borderBottom: `1px solid ${T.pageBdr}` }}><div style={{ fontSize: 11, fontWeight: 700, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Colonnes supplémentaires</div><div style={{ fontSize: 11, color: T.pageTer }}>Données importées depuis Excel</div></div>
-                <div style={{ padding: "6px 0", maxHeight: 280, overflowY: "auto" }}>{allExtraKeys.map(k => { const on = visibleExtraCols.has(k); return (<button key={k} onClick={() => setVisibleExtraCols(prev => { const n = new Set(prev); on ? n.delete(k) : n.add(k); return n; })} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "7px 14px", border: "none", background: "transparent", cursor: "pointer", textAlign: "left" }} onMouseEnter={e => e.currentTarget.style.background = "rgba(55,53,47,0.04)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}><div style={{ width: 16, height: 16, borderRadius: 3, border: `1.5px solid ${on ? "transparent" : T.pageTer}`, background: on ? T.accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.12s" }}>{on && <Check style={{ width: 10, height: 10, color: "#fff", strokeWidth: 3 }} />}</div><span style={{ fontSize: 13, color: T.pageText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{k}</span></button>); })}</div>
-                <div style={{ padding: "8px 14px", borderTop: `1px solid ${T.pageBdr}`, display: "flex", gap: 8, background: "rgba(55,53,47,0.015)" }}><button onClick={() => setVisibleExtraCols(new Set(allExtraKeys))} style={{ flex: 1, padding: "5px", fontSize: 12, border: `1px solid ${T.pageBdr}`, borderRadius: 4, background: "transparent", cursor: "pointer", color: T.pageSub, fontFamily: "inherit" }}>Tout afficher</button><button onClick={() => setVisibleExtraCols(new Set())} style={{ flex: 1, padding: "5px", fontSize: 12, border: `1px solid ${T.pageBdr}`, borderRadius: 4, background: "transparent", cursor: "pointer", color: T.pageSub, fontFamily: "inherit" }}>Tout masquer</button></div>
-              </div>}
-            </div>);
+            return (
+              <div ref={colPickerRef} style={{ position:"relative" }}>
+                <button onClick={()=>setShowColPicker(v=>!v)} style={{ display:"flex", alignItems:"center", gap:5, height:26, padding:"0 10px", fontSize:13, fontFamily:"inherit", cursor:"pointer", border:`1px solid ${showColPicker||activeCount>0?"rgba(55,53,47,0.3)":T.pageBdr}`, background:showColPicker?"rgba(55,53,47,0.07)":"transparent", color:showColPicker?T.pageText:T.pageSub, borderRadius:4 }}>
+                  <Settings style={{ width:12, height:12 }}/>
+                  {!isMobile && "Colonnes"}
+                  {activeCount > 0 && <span style={{ minWidth:16, height:16, borderRadius:8, background:T.accent, color:"#fff", fontSize:10, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{activeCount}</span>}
+                  <ChevronDown style={{ width:11, height:11, transform:showColPicker?"rotate(180deg)":"none", transition:"transform 0.15s" }}/>
+                </button>
+                {showColPicker && (
+                  <div style={{ position:"absolute", top:"calc(100% + 6px)", left:0, zIndex:200, background:"#fff", borderRadius:6, border:`1px solid ${T.pageBdr}`, boxShadow:"0 8px 24px rgba(0,0,0,0.12)", minWidth:260, overflow:"hidden" }}>
+                    <div style={{ padding:"10px 14px 8px", borderBottom:`1px solid ${T.pageBdr}` }}>
+                      <div style={{ fontSize:11, fontWeight:700, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:2 }}>Colonnes supplémentaires</div>
+                      <div style={{ fontSize:11, color:T.pageTer }}>Données importées depuis Excel</div>
+                    </div>
+                    <div style={{ padding:"6px 0", maxHeight:280, overflowY:"auto" }}>
+                      {allExtraKeys.map(k => { const on=visibleExtraCols.has(k); return (
+                        <button key={k} onClick={()=>setVisibleExtraCols(prev=>{const n=new Set(prev);on?n.delete(k):n.add(k);return n;})} style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"7px 14px", border:"none", background:"transparent", cursor:"pointer", textAlign:"left" }} onMouseEnter={e=>e.currentTarget.style.background="rgba(55,53,47,0.04)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <div style={{ width:16, height:16, borderRadius:3, border:`1.5px solid ${on?"transparent":T.pageTer}`, background:on?T.accent:"transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all 0.12s" }}>{on&&<Check style={{ width:10, height:10, color:"#fff", strokeWidth:3 }}/>}</div>
+                          <span style={{ fontSize:13, color:T.pageText, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{k}</span>
+                        </button>
+                      );})}
+                    </div>
+                    <div style={{ padding:"8px 14px", borderTop:`1px solid ${T.pageBdr}`, display:"flex", gap:8, background:"rgba(55,53,47,0.015)" }}>
+                      <button onClick={()=>setVisibleExtraCols(new Set(allExtraKeys))} style={{ flex:1, padding:"5px", fontSize:12, border:`1px solid ${T.pageBdr}`, borderRadius:4, background:"transparent", cursor:"pointer", color:T.pageSub, fontFamily:"inherit" }}>Tout afficher</button>
+                      <button onClick={()=>setVisibleExtraCols(new Set())} style={{ flex:1, padding:"5px", fontSize:12, border:`1px solid ${T.pageBdr}`, borderRadius:4, background:"transparent", cursor:"pointer", color:T.pageSub, fontFamily:"inherit" }}>Tout masquer</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
           })()}
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 5, height: 26, padding: "0 9px", border: `1px solid ${T.pageBdr}`, borderRadius: 4 }}><Search style={{ width: 12, height: 12, color: T.pageTer }} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher…" style={{ fontSize: 13, border: "none", outline: "none", color: T.pageText, fontFamily: "inherit", width: 140, background: "transparent" }} />{search && <button onClick={() => setSearch("")} style={{ border: "none", background: "none", cursor: "pointer", color: T.pageTer, display: "flex", padding: 0 }}><X style={{ width: 10, height: 10 }} /></button>}</div>
-            <button onClick={exportCandidats} disabled={filtered.length === 0} style={{ display: "flex", alignItems: "center", gap: 5, height: 26, padding: "0 10px", fontSize: 13, fontWeight: 500, color: T.pageText, background: "transparent", border: `1px solid rgba(55,53,47,0.25)`, borderRadius: 4, cursor: filtered.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: filtered.length === 0 ? 0.4 : 1 }} onMouseEnter={e => { if (filtered.length > 0) e.currentTarget.style.background = "rgba(55,53,47,0.06)"; }} onMouseLeave={e => e.currentTarget.style.background = "transparent"}><FileUp style={{ width: 13, height: 13 }} /> Exporter Excel</button>
-            {canImport && (
-            <button onClick={() => setMultiImportOpen(true)} style={{ display: "flex", alignItems: "center", gap: 5, height: 26, padding: "0 10px", fontSize: 13, fontWeight: 500, color: T.pageText, background: "transparent", border: `1px solid rgba(55,53,47,0.25)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-              <FileStack style={{ width: 13, height: 13 }} /> Import 3 bases
-            </button>
+
+          {/* Actions droite */}
+          <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+
+            {/* Recherche — masquée sur mobile (intégrée dans filtres) */}
+            {!isMobile && (
+              <div style={{ display:"flex", alignItems:"center", gap:5, height:26, padding:"0 9px", border:`1px solid ${T.pageBdr}`, borderRadius:4 }}>
+                <Search style={{ width:12, height:12, color:T.pageTer }}/>
+                <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher…" style={{ fontSize:13, border:"none", outline:"none", color:T.pageText, fontFamily:"inherit", width:130, background:"transparent" }}/>
+                {search && <button onClick={()=>setSearch("")} style={{ border:"none", background:"none", cursor:"pointer", color:T.pageTer, display:"flex", padding:0 }}><X style={{ width:10, height:10 }}/></button>}
+              </div>
             )}
-           {multiImportOpen && (
-  <MultiBaseImportWizard
-    onClose={() => setMultiImportOpen(false)}
-  onDone={async (cands, newTasks, newDocs) => { // <--- Ajout de newDocs ici
-    // 1. Mise à jour IMMÉDIATE et complète (Optimiste)
-    setCandidats(normArr(cands));
-    setTasks(normArr(newTasks));
-    if (newDocs) setDocuments(normArr(newDocs)); // <--- Mise à jour immédiate des docs !
 
-    showToast("Importation réussie", "success");
+            <button onClick={exportCandidats} disabled={filtered.length===0} style={{ display:"flex", alignItems:"center", gap:5, height:26, padding:"0 10px", fontSize:12, fontWeight:500, color:T.pageText, background:"transparent", border:`1px solid rgba(55,53,47,0.25)`, borderRadius:4, cursor:filtered.length===0?"not-allowed":"pointer", fontFamily:"inherit", opacity:filtered.length===0?0.4:1 }}>
+              <FileUp style={{ width:12, height:12 }}/>{!isMobile&&" Excel"}
+            </button>
 
-    // 2. Synchronisation de sécurité avec le serveur (optionnel si le point 1 est bien fait)
-    setTimeout(async () => {
-      try {
-        const [resTasks, resCands, resDocs] = await Promise.all([
-          apiFetch(`/workspaces/${wsId}/tasks`),
-          apiFetch(`/workspaces/${wsId}/candidats?limit=5000`),
-          apiFetch(`/workspaces/${wsId}/documents`)
-        ]);
-        
-        setTasks(normArr(extractArray(resTasks, 'tasks')));
-        setCandidats(normArr(extractArray(resCands, 'candidats')));
-        setDocuments(normArr(extractArray(resDocs, 'documents')));
-      } catch (e) {
-        console.error("Erreur de synchronisation finale:", e);
-      }
-    }, 1500);
-  }}
-    setTasks={setTasks}
-    wsStart={ws?.startDate || null}
-    wsEnd={ws?.endDate || null}
-    wsId={wsId}
-    showToast={showToast}
-    wsWorkingDays={ws?.workingDays}
-    wsSkipHolidays={ws?.skipHolidays}
-    wsVacances={ws?.vacances}
-  onUpdateWs={onUpdateWs}
-  />
-)}
-            <button onClick={() => setModal("new")} style={{ display: "flex", alignItems: "center", gap: 5, height: 26, padding: "0 10px", fontSize: 13, fontWeight: 500, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }} onMouseEnter={e => e.currentTarget.style.background = "#111"} onMouseLeave={e => e.currentTarget.style.background = "#37352f"}><Plus style={{ width: 13, height: 13 }} />Nouveau</button>
+            {canImport && (
+              <button onClick={()=>setMultiImportOpen(true)} style={{ display:"flex", alignItems:"center", gap:5, height:26, padding:"0 10px", fontSize:12, fontWeight:500, color:T.pageText, background:"transparent", border:`1px solid rgba(55,53,47,0.25)`, borderRadius:4, cursor:"pointer", fontFamily:"inherit" }}>
+                <FileStack style={{ width:12, height:12 }}/>{!isMobile&&" Import 3 bases"}
+              </button>
+            )}
+
+            {multiImportOpen && (
+              <MultiBaseImportWizard
+                onClose={()=>setMultiImportOpen(false)}
+                onDone={async (cands, newTasks, newDocs) => {
+                  setCandidats(normArr(cands));
+                  setTasks(normArr(newTasks));
+                  if (newDocs) setDocuments(normArr(newDocs));
+                  showToast("Importation réussie","success");
+                  setTimeout(async () => {
+                    try {
+                      const [resTasks,resCands,resDocs] = await Promise.all([
+                        apiFetch(`/workspaces/${wsId}/tasks`),
+                        apiFetch(`/workspaces/${wsId}/candidats?limit=5000`),
+                        apiFetch(`/workspaces/${wsId}/documents`),
+                      ]);
+                      setTasks(normArr(extractArray(resTasks,"tasks")));
+                      setCandidats(normArr(extractArray(resCands,"candidats")));
+                      setDocuments(normArr(extractArray(resDocs,"documents")));
+                    } catch(e) { console.error("Erreur sync:",e); }
+                  }, 1500);
+                }}
+                setTasks={setTasks}
+                wsStart={ws?.startDate||null}
+                wsEnd={ws?.endDate||null}
+                wsId={wsId}
+                showToast={showToast}
+                wsWorkingDays={ws?.workingDays}
+                wsSkipHolidays={ws?.skipHolidays}
+                wsVacances={ws?.vacances}
+                onUpdateWs={onUpdateWs}
+              />
+            )}
+
+            <button onClick={()=>setModal("new")} style={{ display:"flex", alignItems:"center", gap:5, height:26, padding:"0 10px", fontSize:12, fontWeight:500, color:"#fff", background:"#37352f", border:"none", borderRadius:4, cursor:"pointer", fontFamily:"inherit" }}>
+              <Plus style={{ width:12, height:12 }}/>{!isMobile&&" Nouveau"}
+            </button>
           </div>
         </div>
-        {showFilters && (<div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, padding: "14px 16px", background: "rgba(55,53,47,0.015)", display: "flex", flexDirection: "column", gap: 12 }}>
-          {allThemes.length > 0 && <div><div style={{ fontSize: 10, fontWeight: 600, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Thème de formation</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{filterBtn(filterTheme === "Tous", () => setFilterTheme("Tous"), <><span>Tous</span><span style={{ fontSize: 11, color: T.pageTer }}>({uniqueFilteredCount})</span></>)}{allThemes.map(t => { const count = filtered.filter(c => c.theme === t).length; const pal = grpTag(t); return filterBtn(filterTheme === t, () => setFilterTheme(filterTheme === t ? "Tous" : t), <><span style={{ width: 6, height: 6, borderRadius: 2, background: pal.text, display: "inline-block" }} /><span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{t}</span><span style={{ fontSize: 11, color: T.pageTer }}>({count})</span></>); })}</div></div>}
-          {allGroupes.length > 0 && <div><div style={{ fontSize: 10, fontWeight: 600, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Groupe</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{filterBtn(filterGroupe === "Tous", () => setFilterGroupe("Tous"), <span>Tous</span>)}{allGroupes.map(g => filterBtn(filterGroupe === g, () => setFilterGroupe(filterGroupe === g ? "Tous" : g), <span>Grp {g}</span>))}</div></div>}
-        </div>)}
+
+        {/* Barre de recherche mobile */}
+        {isMobile && (
+          <div style={{ display:"flex", alignItems:"center", gap:5, height:32, padding:"0 10px", border:`1px solid ${T.pageBdr}`, borderRadius:6, background:"#fff" }}>
+            <Search style={{ width:13, height:13, color:T.pageTer, flexShrink:0 }}/>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher un candidat…" style={{ flex:1, fontSize:13, border:"none", outline:"none", color:T.pageText, fontFamily:"inherit", background:"transparent" }}/>
+            {search && <button onClick={()=>setSearch("")} style={{ border:"none", background:"none", cursor:"pointer", color:T.pageTer, display:"flex", padding:0 }}><X style={{ width:11, height:11 }}/></button>}
+          </div>
+        )}
+
+        {/* Panneau filtres */}
+        {showFilters && (
+          <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:6, padding:"14px 16px", background:"rgba(55,53,47,0.015)", display:"flex", flexDirection:"column", gap:12 }}>
+            {allThemes.length > 0 && (
+              <div>
+                <div style={{ fontSize:10, fontWeight:600, color:T.pageTer, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Thème de formation</div>
+                <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                  {filterBtn(filterTheme==="Tous",()=>setFilterTheme("Tous"),<><span>Tous</span><span style={{ fontSize:11, color:T.pageTer }}>({uniqueFilteredCount})</span></>)}
+                  {allThemes.map(t=>{ const count=filtered.filter(c=>c.theme===t).length; const pal=grpTag(t); return filterBtn(filterTheme===t,()=>setFilterTheme(filterTheme===t?"Tous":t),<><span style={{ width:6, height:6, borderRadius:2, background:pal.text, display:"inline-block" }}/><span style={{ maxWidth:isMobile?120:220, overflow:"hidden", textOverflow:"ellipsis" }}>{t}</span><span style={{ fontSize:11, color:T.pageTer }}>({count})</span></>); })}
+                </div>
+              </div>
+            )}
+            {allGroupes.length > 0 && (
+              <div>
+                <div style={{ fontSize:10, fontWeight:600, color:T.pageTer, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Groupe</div>
+                <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                  {filterBtn(filterGroupe==="Tous",()=>setFilterGroupe("Tous"),<span>Tous</span>)}
+                  {allGroupes.map(g=>filterBtn(filterGroupe===g,()=>setFilterGroupe(filterGroupe===g?"Tous":g),<span>Grp {g}</span>))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* ══════════════════════════════════════════════════════════
+          ÉTAT VIDE
+      ══════════════════════════════════════════════════════════ */}
       {filtered.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "80px 0" }}><Users style={{ width: 36, height: 36, color: T.pageTer, margin: "0 auto 12px", display: "block", strokeWidth: 1.4 }} /><div style={{ fontSize: 15, fontWeight: 600, color: T.pageText }}>Aucun candidat</div><div style={{ fontSize: 13, color: T.pageSub, marginTop: 4 }}>{activeFilters > 0 || search ? "Aucun résultat pour les filtres actifs" : "Ajoutez manuellement ou importez depuis Excel"}</div>
+        <div style={{ textAlign:"center", padding:"80px 0" }}>
+          <Users style={{ width:36, height:36, color:T.pageTer, margin:"0 auto 12px", display:"block", strokeWidth:1.4 }}/>
+          <div style={{ fontSize:15, fontWeight:600, color:T.pageText }}>Aucun candidat</div>
+          <div style={{ fontSize:13, color:T.pageSub, marginTop:4 }}>
+            {activeFilters > 0 || search ? "Aucun résultat pour les filtres actifs" : "Ajoutez manuellement ou importez depuis Excel"}
+          </div>
         </div>
+
+      /* ══════════════════════════════════════════════════════════
+          VUE PAR FORMATION
+      ══════════════════════════════════════════════════════════ */
       ) : viewMode === "formation" ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
           {Object.values(formationGroups).map(fg => {
-            const pal = grpTag(fg.theme); return (<div key={`${fg.theme}||${fg.groupe}`} style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", background: "rgba(55,53,47,0.02)", borderBottom: `1px solid ${T.pageBdr}` }}><div style={{ width: 8, height: 8, borderRadius: 2, background: pal.text, flexShrink: 0 }} /><div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: T.pageText }}>{fg.theme}</div><Tag label={`Groupe ${fg.groupe}`} scheme={pal} /><div style={{ display: "flex", gap: 8, fontSize: 12, color: T.pageSub }}><span><span style={{ fontFamily: "monospace", fontWeight: 600, color: T.pageText }}>{fg.jours === 0.5 ? "½" : fg.jours}</span> jour{fg.jours > 1 ? "s" : ""}</span><span>·</span><span><span style={{ fontFamily: "monospace", fontWeight: 600, color: T.pageText }}>{fg.cands.length}</span> candidat{fg.cands.length > 1 ? "s" : ""}</span>{fg.start && <><span>·</span><span style={{ fontFamily: "monospace", fontSize: 11 }}>{fmt(fg.start)} → {fmt(fg.end)}</span></>}</div></div>
-              {fg.cands.map((c, i) => { const st = C_STATUS.find(s => s.key === c.statut) || C_STATUS[0]; return (<div key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "7px 16px", borderBottom: i < fg.cands.length - 1 ? `1px solid ${T.pageBdr}` : "none", background: "#fff", transition: "background 0.06s" }} onMouseEnter={e => e.currentTarget.style.background = T.pageHov} onMouseLeave={e => e.currentTarget.style.background = "#fff"}><div style={{ width: 24, height: 24, borderRadius: 4, background: "rgba(55,53,47,0.07)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: T.pageSub, flexShrink: 0 }}>{c.nom.charAt(0)}{c.prenom?.charAt(0) || ""}</div><span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: T.pageText }}>{c.nom} {c.prenom}</span><Tag label={c.statut} scheme={{ text: st.text, bg: st.bg }} /><div style={{ display: "flex", gap: 2 }}><button onClick={() => setModal(c)} style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }} onMouseEnter={e => e.currentTarget.style.background = "rgba(55,53,47,0.1)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}><Edit2 style={{ width: 10, height: 10 }} /></button><button onClick={() => delCand(c.id)} style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }} onMouseEnter={e => { e.currentTarget.style.background = "rgba(212,76,71,0.1)"; e.currentTarget.style.color = "#d44c47"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.pageTer; }}><Trash2 style={{ width: 10, height: 10 }} /></button></div></div>); })}
-            </div>);
+            const pal = grpTag(fg.theme);
+            return (
+              <div key={`${fg.theme}||${fg.groupe}`} style={{ border:`1px solid ${T.pageBdr}`, borderRadius:6, overflow:"hidden" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 16px", background:"rgba(55,53,47,0.02)", borderBottom:`1px solid ${T.pageBdr}`, flexWrap:"wrap" }}>
+                  <div style={{ width:8, height:8, borderRadius:2, background:pal.text, flexShrink:0 }}/>
+                  <div style={{ flex:1, fontSize:13, fontWeight:700, color:T.pageText, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fg.theme}</div>
+                  <Tag label={`Groupe ${fg.groupe}`} scheme={pal}/>
+                  <div style={{ display:"flex", gap:8, fontSize:12, color:T.pageSub, flexWrap:"wrap" }}>
+                    <span><span style={{ fontFamily:"monospace", fontWeight:600, color:T.pageText }}>{fg.jours===0.5?"½":fg.jours}</span> jour{fg.jours>1?"s":""}</span>
+                    <span>·</span>
+                    <span><span style={{ fontFamily:"monospace", fontWeight:600, color:T.pageText }}>{fg.cands.length}</span> candidat{fg.cands.length>1?"s":""}</span>
+                    {fg.start && !isMobile && <><span>·</span><span style={{ fontFamily:"monospace", fontSize:11 }}>{fmt(fg.start)} → {fmt(fg.end)}</span></>}
+                  </div>
+                </div>
+                {fg.cands.map((c, i) => {
+                  const st = C_STATUS.find(s => s.key === c.statut) || C_STATUS[0];
+                  return (
+                    <div key={c.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"7px 16px", borderBottom:i<fg.cands.length-1?`1px solid ${T.pageBdr}`:"none", background:"#fff", transition:"background 0.06s" }} onMouseEnter={e=>e.currentTarget.style.background=T.pageHov} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                      <div style={{ width:24, height:24, borderRadius:4, background:"rgba(55,53,47,0.07)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:T.pageSub, flexShrink:0 }}>{c.nom.charAt(0)}{c.prenom?.charAt(0)||""}</div>
+                      <span style={{ flex:1, fontSize:13, fontWeight:500, color:T.pageText, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.nom} {c.prenom}</span>
+                      {!isMobile && <Tag label={c.statut} scheme={{ text:st.text, bg:st.bg }}/>}
+                      <div style={{ display:"flex", gap:2 }}>
+                        <button onClick={()=>setModal(c)} style={{ width:22, height:22, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>e.currentTarget.style.background="rgba(55,53,47,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><Edit2 style={{ width:10, height:10 }}/></button>
+                        <button onClick={()=>delCand(c.id)} style={{ width:22, height:22, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(212,76,71,0.1)";e.currentTarget.style.color="#d44c47";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Trash2 style={{ width:10, height:10 }}/></button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
           })}
-          {filtered.filter(c => !c.theme).length > 0 && (<div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}><div style={{ padding: "10px 16px", background: "rgba(55,53,47,0.02)", borderBottom: `1px solid ${T.pageBdr}`, fontSize: 13, fontWeight: 600, color: T.pageSub }}>Sans formation assignée</div>{filtered.filter(c => !c.theme).map((c, i, arr) => { const st = C_STATUS.find(s => s.key === c.statut) || C_STATUS[0]; return (<div key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 16px", borderBottom: i < arr.length - 1 ? `1px solid ${T.pageBdr}` : "none", background: "#fff" }} onMouseEnter={e => e.currentTarget.style.background = T.pageHov} onMouseLeave={e => e.currentTarget.style.background = "#fff"}><div style={{ width: 26, height: 26, borderRadius: 4, background: "rgba(55,53,47,0.07)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: T.pageSub, flexShrink: 0 }}>{c.nom.charAt(0)}{c.prenom?.charAt(0) || ""}</div><span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: T.pageText }}>{c.nom} {c.prenom}</span><span style={{ fontSize: 12, color: T.pageSub }}>{c.poste || "—"}</span><Tag label={c.statut} scheme={{ text: st.text, bg: st.bg }} /><div style={{ display: "flex", gap: 2 }}><button onClick={() => setModal(c)} style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }} onMouseEnter={e => e.currentTarget.style.background = "rgba(55,53,47,0.1)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}><Edit2 style={{ width: 11, height: 11 }} /></button><button onClick={() => delCand(c.id)} style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }} onMouseEnter={e => { e.currentTarget.style.background = "rgba(212,76,71,0.1)"; e.currentTarget.style.color = "#d44c47"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.pageTer; }}><Trash2 style={{ width: 11, height: 11 }} /></button></div></div>); })}</div>)}
+
+          {/* Sans formation */}
+          {filtered.filter(c=>!c.theme).length > 0 && (
+            <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:6, overflow:"hidden" }}>
+              <div style={{ padding:"10px 16px", background:"rgba(55,53,47,0.02)", borderBottom:`1px solid ${T.pageBdr}`, fontSize:13, fontWeight:600, color:T.pageSub }}>Sans formation assignée</div>
+              {filtered.filter(c=>!c.theme).map((c, i, arr) => {
+                const st = C_STATUS.find(s => s.key === c.statut) || C_STATUS[0];
+                return (
+                  <div key={c.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"9px 16px", borderBottom:i<arr.length-1?`1px solid ${T.pageBdr}`:"none", background:"#fff" }} onMouseEnter={e=>e.currentTarget.style.background=T.pageHov} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                    <div style={{ width:26, height:26, borderRadius:4, background:"rgba(55,53,47,0.07)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:T.pageSub, flexShrink:0 }}>{c.nom.charAt(0)}{c.prenom?.charAt(0)||""}</div>
+                    <span style={{ flex:1, fontSize:13, fontWeight:600, color:T.pageText }}>{c.nom} {c.prenom}</span>
+                    {!isMobile && <span style={{ fontSize:12, color:T.pageSub }}>{c.poste||"—"}</span>}
+                    <Tag label={c.statut} scheme={{ text:st.text, bg:st.bg }}/>
+                    <div style={{ display:"flex", gap:2 }}>
+                      <button onClick={()=>setModal(c)} style={{ width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>e.currentTarget.style.background="rgba(55,53,47,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><Edit2 style={{ width:11, height:11 }}/></button>
+                      <button onClick={()=>delCand(c.id)} style={{ width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(212,76,71,0.1)";e.currentTarget.style.color="#d44c47";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Trash2 style={{ width:11, height:11 }}/></button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
+
+      /* ══════════════════════════════════════════════════════════
+          VUE LISTE (virtualisée)
+      ══════════════════════════════════════════════════════════ */
       ) : (() => {
-        const CAND_ROW_H = 42; // hauteur approximative d'une ligne candidat
+        const CAND_ROW_H  = 42;
         const CAND_OVERSCAN = 10;
-        const CAND_VIEW_H = Math.min(filtered.length * CAND_ROW_H, window.innerHeight * 0.65);
-        const totalCandH = filtered.length * CAND_ROW_H;
+        const CAND_VIEW_H = Math.min(filtered.length * CAND_ROW_H, window.innerHeight * (isMobile ? 0.6 : 0.65));
+        const totalCandH  = filtered.length * CAND_ROW_H;
         const startCI = Math.max(0, Math.floor(candScrollTop / CAND_ROW_H) - CAND_OVERSCAN);
-        const endCI = Math.min(filtered.length - 1, Math.ceil((candScrollTop + CAND_VIEW_H) / CAND_ROW_H) + CAND_OVERSCAN);
+        const endCI   = Math.min(filtered.length - 1, Math.ceil((candScrollTop + CAND_VIEW_H) / CAND_ROW_H) + CAND_OVERSCAN);
         const visibleCands = filtered.slice(startCI, endCI + 1);
 
-        const allExtraKeys = []; const seen = new Set(); filtered.forEach(c => { if (c.extraData) Object.keys(c.extraData).forEach(k => { if (!seen.has(k) && k !== "__matricule__") { seen.add(k); allExtraKeys.push(k); } }); });
+        const allExtraKeys=[]; const seenEK=new Set();
+        filtered.forEach(c=>{ if(c.extraData)Object.keys(c.extraData).forEach(k=>{ if(!seenEK.has(k)&&k!=="__matricule__"){seenEK.add(k);allExtraKeys.push(k);} }); });
+
         const hasDates = filtered.some(c => c.dateDebut || c.dateFin);
-        const hasMat = filtered.some(c => c.matricule);
-        const baseCols = [{ key: "candidat", label: "Candidat", flex: "2fr" }, { key: "theme", label: "Thème / Poste", flex: "1.5fr" }, { key: "duree", label: "Durée", flex: "70px" }, { key: "groupe", label: "Groupe", flex: "70px" }, ...(hasDates ? [{ key: "debut", label: "Début", flex: "90px" }, { key: "fin", label: "Fin", flex: "90px" }] : []), ...(hasMat ? [{ key: "matricule", label: "Matricule", flex: "100px" }] : [])];
-        const extraColDefs = allExtraKeys.filter(k => visibleExtraCols.has(k)).map(k => ({ key: `extra_${k}`, label: k, flex: "1fr", extraKey: k }));
-        const allCols = [...baseCols, ...extraColDefs];
-        const gridCols = [...allCols.map(c => c.flex), "60px"].join(" ");
+        const hasMat   = filtered.some(c => c.matricule);
+
+        // ── Colonnes adaptées au mobile ──
+        const baseCols = [
+          { key:"candidat", label:"Candidat", flex:"2fr" },
+          { key:"theme",    label:"Thème",     flex: isMobile ? "1.2fr" : "1.5fr" },
+          { key:"duree",    label:"Durée",      flex:"60px" },
+          ...(!isMobile ? [{ key:"groupe", label:"Groupe", flex:"70px" }] : []),
+          ...(!isMobile && hasDates ? [{ key:"debut", label:"Début", flex:"90px" }, { key:"fin", label:"Fin", flex:"90px" }] : []),
+          ...(!isMobile && hasMat   ? [{ key:"matricule", label:"Matricule", flex:"100px" }] : []),
+        ];
+        const extraColDefs = allExtraKeys.filter(k => visibleExtraCols.has(k) && !isMobile).map(k => ({ key:`extra_${k}`, label:k, flex:"1fr", extraKey:k }));
+        const allCols  = [...baseCols, ...extraColDefs];
+        const gridCols = [...allCols.map(c => c.flex), "50px"].join(" ");
+
         return (
-          <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 4, background: "#fff" }}>
-            <div style={{ display: "grid", gridTemplateColumns: gridCols, background: "#f7f7f7", borderBottom: `1px solid ${T.pageBdr}`, padding: "0 16px", position: "sticky", top: 0, zIndex: 10, borderTopLeftRadius: 3, borderTopRightRadius: 3 }}>{allCols.map(col => (<div key={col.key} style={{ padding: "7px 0", fontSize: 10, fontWeight: 600, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.06em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.label}</div>))}<div /></div>
-            {/* PERF D: conteneur virtuel avec hauteur totale — seules les lignes visibles sont dans le DOM */}
-            <div style={{ height: CAND_VIEW_H, overflowY: "auto", position: "relative" }} onScroll={e => setCandScrollTop(e.currentTarget.scrollTop)}>
-              <div style={{ height: totalCandH, position: "relative" }}>
-                <div style={{ position: "absolute", top: startCI * CAND_ROW_H, left: 0, right: 0 }}>
+          <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:4, background:"#fff" }}>
+            {/* Header */}
+            <div style={{ display:"grid", gridTemplateColumns:gridCols, background:"#f7f7f7", borderBottom:`1px solid ${T.pageBdr}`, padding:`0 ${isMobile?"10px":"16px"}`, position:"sticky", top:0, zIndex:10, borderTopLeftRadius:3, borderTopRightRadius:3 }}>
+              {allCols.map(col => (
+                <div key={col.key} style={{ padding:"7px 0", fontSize:10, fontWeight:600, color:T.pageTer, textTransform:"uppercase", letterSpacing:"0.06em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{col.label}</div>
+              ))}
+              <div/>
+            </div>
+
+            {/* Rows virtualisées */}
+            <div style={{ height:CAND_VIEW_H, overflowY:"auto", position:"relative" }} onScroll={e=>setCandScrollTop(e.currentTarget.scrollTop)}>
+              <div style={{ height:totalCandH, position:"relative" }}>
+                <div style={{ position:"absolute", top:startCI*CAND_ROW_H, left:0, right:0 }}>
                   {visibleCands.map((c, vi) => {
                     const i = startCI + vi;
                     const pal = c.theme ? grpTag(c.theme) : null;
+                    const taskAssociee = tasks.find(t => (t.group===c.theme) && String(t.groupe)===String(c.groupe));
+                    const slotEffectif = taskAssociee?.slot || c.slot;
                     return (
-                      <div key={c.id} style={{ display: "grid", gridTemplateColumns: gridCols, padding: "0 16px", borderBottom: i < filtered.length - 1 ? `1px solid ${T.pageBdr}` : "none", alignItems: "center", background: "#fff", minHeight: CAND_ROW_H, transition: "background 0.06s" }} onMouseEnter={e => e.currentTarget.style.background = T.pageHov} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", minWidth: 0 }}><div style={{ width: 26, height: 26, borderRadius: 4, background: "rgba(55,53,47,0.07)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: T.pageSub, flexShrink: 0 }}>{c.nom.charAt(0)}{c.prenom?.charAt(0) || ""}</div><div style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600, color: T.pageText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nom} {c.prenom}</div></div></div>                <div style={{ fontSize: 12, color: T.pageSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 8 }}>{c.theme ? <Tag label={c.theme} scheme={pal} /> : (c.poste || "—")}</div>
-<div style={{ fontSize: 12, color: T.pageSub, display: 'flex', alignItems: 'center', gap: '6px' }}>
-  {c.jours ? (
-    <>
-      <span style={{ fontFamily: "monospace", fontWeight: 700, color: T.pageText }}>
-        {c.jours === 0.5 ? "½" : c.jours}
-      </span>
-      <span style={{ color: T.pageTer }}> j</span>
+                      <div key={c.id} style={{ display:"grid", gridTemplateColumns:gridCols, padding:`0 ${isMobile?"10px":"16px"}`, borderBottom:i<filtered.length-1?`1px solid ${T.pageBdr}`:"none", alignItems:"center", background:"#fff", minHeight:CAND_ROW_H, transition:"background 0.06s" }} onMouseEnter={e=>e.currentTarget.style.background=T.pageHov} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
 
-      {/* --- LOGIQUE DE RÉCUPÉRATION DU CRÉNEAU --- */}
-      {c.jours === 0.5 && (() => {
-        // On cherche si une tâche Gantt existe pour ce Thème + Groupe
-        const taskAssociee = tasks.find(t => 
-          (t.group === c.theme) && String(t.groupe) === String(c.groupe)
-        );
-        
-        // On prend le slot de la tâche, sinon celui du candidat
-        const slotEffectif = taskAssociee?.slot || c.slot;
+                        {/* Candidat */}
+                        <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", minWidth:0 }}>
+                          <div style={{ width:isMobile?22:26, height:isMobile?22:26, borderRadius:4, background:"rgba(55,53,47,0.07)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:T.pageSub, flexShrink:0 }}>{c.nom.charAt(0)}{c.prenom?.charAt(0)||""}</div>
+                          <div style={{ minWidth:0 }}>
+                            <div style={{ fontSize:isMobile?12:13, fontWeight:600, color:T.pageText, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.nom} {c.prenom}</div>
+                          </div>
+                        </div>
 
-        if (!slotEffectif) return null;
+                        {/* Thème */}
+                        <div style={{ fontSize:12, color:T.pageSub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingRight:8 }}>
+                          {c.theme ? <Tag label={c.theme} scheme={pal}/> : (c.poste||"—")}
+                        </div>
 
-        return (
-          <span style={{
-            fontSize: '9px',
-            fontWeight: '800',
-            padding: '1px 5px',
-            borderRadius: '3px',
-            background: slotEffectif === 'matin' ? 'rgba(217, 115, 13, 0.12)' : 'rgba(15, 125, 219, 0.12)',
-            color: slotEffectif === 'matin' ? '#d9730d' : '#0f7ddb',
-            border: `1px solid ${slotEffectif === 'matin' ? 'rgba(217, 115, 13, 0.3)' : 'rgba(15, 125, 219, 0.3)'}`,
-            textTransform: 'uppercase',
-            marginLeft: '2px'
-          }}>
-            {slotEffectif === 'matin' ? 'AM' : 'PM'}
-          </span>
-        );
-      })()}
-    </>
-  ) : "—"}
-</div>                 
-<div style={{ fontSize: 12, color: T.pageSub }}>{c.groupe ? <><span style={{ color: T.pageTer, fontSize: 11 }}>Grp </span><span style={{ fontFamily: "monospace", fontWeight: 700, color: T.pageText }}>{c.groupe}</span></> : "—"}</div>
-                        {hasDates && <div style={{ fontSize: 11, fontFamily: "monospace", color: c.dateDebut ? T.pageText : T.pageTer }}>{c.dateDebut ? fmt(c.dateDebut) : "—"}</div>}
-                        {hasDates && <div style={{ fontSize: 11, fontFamily: "monospace", color: c.dateFin ? T.pageText : T.pageTer }}>{c.dateFin ? fmt(c.dateFin) : "—"}</div>}
-                        {hasMat && <div style={{ fontSize: 11, fontFamily: "monospace", color: c.matricule ? T.pageText : T.pageTer, fontWeight: c.matricule ? 500 : 400 }}>{c.matricule || "—"}</div>}
-                        {extraColDefs.map(ec => (<div key={ec.key} style={{ fontSize: 12, color: T.pageSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 8 }}>{c.extraData?.[ec.extraKey] || <span style={{ color: T.pageTer }}>—</span>}</div>))}
-                        <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}><button onClick={() => setModal(c)} style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }} onMouseEnter={e => e.currentTarget.style.background = "rgba(55,53,47,0.1)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}><Edit2 style={{ width: 11, height: 11 }} /></button><button onClick={() => delCand(c.id)} style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }} onMouseEnter={e => { e.currentTarget.style.background = "rgba(212,76,71,0.1)"; e.currentTarget.style.color = "#d44c47"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.pageTer; }}><Trash2 style={{ width: 11, height: 11 }} /></button></div>
+                        {/* Durée */}
+                        <div style={{ fontSize:12, color:T.pageSub, display:"flex", alignItems:"center", gap:4 }}>
+                          {c.jours ? (
+                            <>
+                              <span style={{ fontFamily:"monospace", fontWeight:700, color:T.pageText }}>{c.jours===0.5?"½":c.jours}</span>
+                              <span style={{ color:T.pageTer }}>j</span>
+                              {c.jours === 0.5 && slotEffectif && (
+                                <span style={{ fontSize:9, fontWeight:800, padding:"1px 4px", borderRadius:3, background:slotEffectif==="matin"?"rgba(217,115,13,0.12)":"rgba(15,125,219,0.12)", color:slotEffectif==="matin"?"#d9730d":"#0f7ddb", border:`1px solid ${slotEffectif==="matin"?"rgba(217,115,13,0.3)":"rgba(15,125,219,0.3)"}`, textTransform:"uppercase" }}>
+                                  {slotEffectif==="matin"?"AM":"PM"}
+                                </span>
+                              )}
+                            </>
+                          ) : "—"}
+                        </div>
+
+                        {/* Groupe (desktop seulement) */}
+                        {!isMobile && (
+                          <div style={{ fontSize:12, color:T.pageSub }}>
+                            {c.groupe ? <><span style={{ color:T.pageTer, fontSize:11 }}>Grp </span><span style={{ fontFamily:"monospace", fontWeight:700, color:T.pageText }}>{c.groupe}</span></> : "—"}
+                          </div>
+                        )}
+
+                        {/* Dates (desktop seulement) */}
+                        {!isMobile && hasDates && <div style={{ fontSize:11, fontFamily:"monospace", color:c.dateDebut?T.pageText:T.pageTer }}>{c.dateDebut?fmt(c.dateDebut):"—"}</div>}
+                        {!isMobile && hasDates && <div style={{ fontSize:11, fontFamily:"monospace", color:c.dateFin?T.pageText:T.pageTer }}>{c.dateFin?fmt(c.dateFin):"—"}</div>}
+
+                        {/* Matricule (desktop seulement) */}
+                        {!isMobile && hasMat && <div style={{ fontSize:11, fontFamily:"monospace", color:c.matricule?T.pageText:T.pageTer, fontWeight:c.matricule?500:400 }}>{c.matricule||"—"}</div>}
+
+                        {/* Colonnes extra (desktop seulement) */}
+                        {extraColDefs.map(ec => (
+                          <div key={ec.key} style={{ fontSize:12, color:T.pageSub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingRight:8 }}>
+                            {c.extraData?.[ec.extraKey]||<span style={{ color:T.pageTer }}>—</span>}
+                          </div>
+                        ))}
+
+                        {/* Actions */}
+                        <div style={{ display:"flex", gap:2, justifyContent:"flex-end" }}>
+                          <button onClick={()=>setModal(c)} style={{ width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>e.currentTarget.style.background="rgba(55,53,47,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><Edit2 style={{ width:11, height:11 }}/></button>
+                          <button onClick={()=>delCand(c.id)} style={{ width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(212,76,71,0.1)";e.currentTarget.style.color="#d44c47";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Trash2 style={{ width:11, height:11 }}/></button>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
             </div>
-            {allExtraKeys.length > 0 && extraColDefs.length === 0 && <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderTop: `1px solid ${T.pageBdr}`, background: "rgba(55,53,47,0.015)" }}><Settings style={{ width: 11, height: 11, color: T.pageTer }} /><span style={{ fontSize: 11, color: T.pageTer }}>{allExtraKeys.length} colonne{allExtraKeys.length > 1 ? "s" : ""} masquée{allExtraKeys.length > 1 ? "s" : ""} — <button onClick={() => setShowColPicker(true)} style={{ fontSize: 11, color: T.accent, border: "none", background: "none", cursor: "pointer", padding: 0, textDecoration: "underline", fontFamily: "inherit" }}>Afficher via Colonnes</button></span></div>}
+
+            {/* Hint colonnes masquées */}
+            {allExtraKeys.length > 0 && extraColDefs.length === 0 && !isMobile && (
+              <div style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 16px", borderTop:`1px solid ${T.pageBdr}`, background:"rgba(55,53,47,0.015)" }}>
+                <Settings style={{ width:11, height:11, color:T.pageTer }}/>
+                <span style={{ fontSize:11, color:T.pageTer }}>
+                  {allExtraKeys.length} colonne{allExtraKeys.length>1?"s":""} masquée{allExtraKeys.length>1?"s":""} — <button onClick={()=>setShowColPicker(true)} style={{ fontSize:11, color:T.accent, border:"none", background:"none", cursor:"pointer", padding:0, textDecoration:"underline", fontFamily:"inherit" }}>Afficher via Colonnes</button>
+                </span>
+              </div>
+            )}
           </div>
         );
       })()}
@@ -10164,7 +10312,28 @@ function SyntheseCoutsDesigner({ doc, candidats, tasks, onClose }) {
   );
 }
 
-function DocsView({currentUser, documents, setDocuments, wsId, showToast, candidats, tasks, ws  }) {
+function DModal({ item, onClose, onSave }) {
+  const [f, setF] = useState(item || { nom: "", type: "Contrat", statut: "Reçu", dateDoc: "", lien: "", notes: "" });
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 8, boxShadow: "0 16px 48px rgba(0,0,0,0.18)", width: "min(440px,95vw)", border: `1px solid rgba(55,53,47,0.13)`, overflow: "hidden" }}>
+        <div style={{ padding: "20px 24px 14px", borderBottom: `1px solid ${T.pageBdr}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}><span style={{ fontSize: 16, fontWeight: 700, color: T.pageText, letterSpacing: "-0.02em" }}>{item ? "Modifier" : "Nouveau document"}</span><button onClick={onClose} style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", color: T.pageSub }}><X style={{ width: 14, height: 14 }} /></button></div>
+        <div style={{ padding: "18px 24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ gridColumn: "span 2" }}><div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 5 }}>Nom du document *</div><input autoFocus value={f.nom} onChange={e => setF(p => ({ ...p, nom: e.target.value }))} placeholder="Ex: Contrat de prestation…" style={{ width: "100%", boxSizing: "border-box", padding: "7px 10px", borderRadius: 4, border: `1px solid rgba(55,53,47,0.2)`, fontSize: 13, color: T.pageText, outline: "none", fontFamily: "inherit" }} onFocus={e => { e.target.style.borderColor = T.accent; e.target.style.boxShadow = `0 0 0 2px ${T.accent}22`; }} onBlur={e => { e.target.style.borderColor = "rgba(55,53,47,0.2)"; e.target.style.boxShadow = "none"; }} /></div>
+          <div><div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Type</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>{DOC_TYPES.map(t => <button key={t} onClick={() => setF(p => ({ ...p, type: t }))} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", borderRadius: 3, border: `1px solid ${f.type === t ? "rgba(55,53,47,0.4)" : T.pageBdr}`, background: f.type === t ? "rgba(55,53,47,0.07)" : "transparent", color: f.type === t ? T.pageText : T.pageSub, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: f.type === t ? 600 : 400 }}><DocIcon type={t} size={13} />{t}</button>)}</div></div>
+          <div><div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Statut</div><div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{DOC_STATUS.map(s => <button key={s.key} onClick={() => setF(p => ({ ...p, statut: s.key }))} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 3, border: `1px solid ${f.statut === s.key ? s.text : "rgba(55,53,47,0.15)"}`, background: f.statut === s.key ? s.bg : "transparent", color: f.statut === s.key ? s.text : T.pageSub, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: f.statut === s.key ? 600 : 400, textAlign: "left" }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: s.text, flexShrink: 0 }} />{s.key}</button>)}</div></div>
+          <div><div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 5 }}>Date</div><input type="date" value={f.dateDoc || ""} onChange={e => setF(p => ({ ...p, dateDoc: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", padding: "7px 10px", borderRadius: 4, border: `1px solid rgba(55,53,47,0.2)`, fontSize: 13, color: T.pageText, outline: "none", fontFamily: "inherit" }} /></div>
+          <div><div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 5 }}>Lien / URL</div><input type="url" value={f.lien || ""} onChange={e => setF(p => ({ ...p, lien: e.target.value }))} placeholder="https://…" style={{ width: "100%", boxSizing: "border-box", padding: "7px 10px", borderRadius: 4, border: `1px solid rgba(55,53,47,0.2)`, fontSize: 13, color: T.pageText, outline: "none", fontFamily: "inherit" }} /></div>
+          <div style={{ gridColumn: "span 2" }}><div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 5 }}>Notes</div><textarea value={f.notes || ""} onChange={e => setF(p => ({ ...p, notes: e.target.value }))} rows={3} style={{ width: "100%", boxSizing: "border-box", padding: "7px 10px", borderRadius: 4, border: `1px solid rgba(55,53,47,0.2)`, fontSize: 13, color: T.pageText, outline: "none", fontFamily: "inherit", resize: "vertical" }} /></div>
+        </div>
+        <div style={{ padding: "12px 24px", borderTop: `1px solid ${T.pageBdr}`, display: "flex", justifyContent: "flex-end", gap: 8, background: "rgba(55,53,47,0.02)" }}><button onClick={onClose} style={{ padding: "6px 14px", fontSize: 13, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Annuler</button><button onClick={() => { if (!f.nom.trim()) return; onSave(f); onClose(); }} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }} onMouseEnter={e => e.currentTarget.style.background = "#111"} onMouseLeave={e => e.currentTarget.style.background = "#37352f"}>{item ? "Enregistrer" : "Ajouter"}</button></div>
+      </div>
+    </div>
+  );
+}
+
+
+function DocsView({currentUser, documents, setDocuments, wsId, showToast, candidats, tasks, ws }) {
   const [syntheseCoutsItem, setSyntheseCoutsItem] = useState(null);
   const [recapItem, setRecapItem] = useState(null);
   const [ficheTechItem, setFicheTechItem] = useState(null);
@@ -10174,26 +10343,23 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
   const [search, setSearch] = useState("");
   const [view, setView] = useState("table");
 
-  const filteredByPermission = useMemo(() => {
-    // Si c'est l'administrateur (propriétaire), il voit tout
-    if (!currentUser?.parentId) return documents;
-    
-    // Sinon, on filtre selon sa liste allowedDocTypes
-    const allowed = currentUser?.permissions?.allowedDocTypes || [];
-    return documents.filter(doc => allowed.includes(doc.type));
-  }, [documents, currentUser])
+  // ── Responsive ──────────────────────────────────────────────
+  const [windowW, setWindowW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  useEffect(() => {
+    const handler = () => setWindowW(window.innerWidth);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+  const isMobile = windowW < 768;
+  const isTablet = windowW < 1024;
+  // ────────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
-    // 1. Filtrage par Permission (allowedDocTypes)
     let list = documents;
-    
-    // Si c'est un sous-compte (il a un parentId)
     if (currentUser?.parentId) {
       const allowed = currentUser?.permissions?.allowedDocTypes || [];
       list = documents.filter(d => allowed.includes(d.type));
     }
-
-    // 2. Puis on applique vos filtres habituels (Recherche + Onglets type)
     return list.filter(d =>
       (filter === "Tous" || d.type === filter) &&
       (!search || d.nom.toLowerCase().includes(search.toLowerCase()))
@@ -10218,88 +10384,50 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
     catch (e) { showToast("Erreur suppression : " + e.message); }
   };
 
-  // ── Helpers détection type ──
-  const isEmargement = doc =>
-    doc.type === "Émargement" ||
-    doc.nom?.toLowerCase().includes("émargement") ||
-    doc.nom?.toLowerCase().includes("emargement");
+  const isEmargement  = doc => doc.type === "Émargement"        || doc.nom?.toLowerCase().includes("émargement")       || doc.nom?.toLowerCase().includes("emargement");
+  const isFicheTech   = doc => doc.type === "Fiche technique"   || doc.nom?.toLowerCase().includes("fiche technique");
+  const isRecap       = doc => doc.type === "Récapitulatif"     || doc.nom?.toLowerCase().includes("récapitulatif")     || doc.nom?.toLowerCase().includes("recapitulatif");
+  const isSyntheseCouts = doc => doc.type === "Synthèse des coûts" || doc.nom?.toLowerCase().includes("synthèse des coûts");
 
-  const isFicheTech = doc =>
-    doc.type === "Fiche technique" ||
-    doc.nom?.toLowerCase().includes("fiche technique");
+  // ── Colonnes table selon taille écran ──
+  const tableColumns = isMobile
+    ? "1fr 60px"           // mobile  : Nom + Actions
+    : isTablet
+      ? "3fr 1fr 80px"     // tablette: Nom + Statut + Actions
+      : "3fr 1fr 1fr 1fr 80px"; // desktop : tout
 
-    const isRecap = doc => 
-  doc.type === "Récapitulatif" || 
-  doc.nom?.toLowerCase().includes("récapitulatif") ||
-  doc.nom?.toLowerCase().includes("recapitulatif");
-
-  const isSyntheseCouts = doc => 
-  doc.type === "Synthèse des coûts" || 
-  doc.nom?.toLowerCase().includes("synthèse des coûts");
-
-  
+  const tableHeaders = isMobile
+    ? ["Document", ""]
+    : isTablet
+      ? ["Document", "Statut", ""]
+      : ["Document", "Type", "Date", "Statut", ""];
 
   return (
-    <div style={{ padding: "30px 40px 80px", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ padding: isMobile ? "16px 12px 60px" : isTablet ? "20px 20px 60px" : "30px 40px 80px", width: "100%", boxSizing: "border-box" }}>
 
-      {/* ── Modals — TOUS DANS LE RETURN ── */}
-      {modal && (
-        <DModal
-          item={modal === "new" ? null : modal}
-          onClose={() => setModal(null)}
-          onSave={save}
-        />
-      )}
-      {previewItem && (
-        <AttendanceDesigner
-          doc={previewItem}
-          candidats={candidats}
-          tasks={tasks}          // ← ajouter cette prop
-          ws={ws}
-          onClose={() => setPreviewItem(null)}
-        />
-      )}
-      {ficheTechItem && (
-        <FicheTechniqueDesigner
-          doc={ficheTechItem}
-          candidats={candidats}
-          tasks={tasks}
-          onClose={() => setFicheTechItem(null)}
-        />
-      )}
-
-      {recapItem && (
-  <RecapitulatifDesigner
-    doc={recapItem}
-    candidats={candidats}
-    tasks={tasks}
-    onClose={() => setRecapItem(null)}
-  />
-)}
-
-{syntheseCoutsItem && (
-  <SyntheseCoutsDesigner
-    doc={syntheseCoutsItem}
-    candidats={candidats}
-    tasks={tasks}
-    onClose={() => setSyntheseCoutsItem(null)}
-  />
-)}
+      {/* ── Modals ── */}
+      {modal && <DModal item={modal === "new" ? null : modal} onClose={() => setModal(null)} onSave={save} />}
+      {previewItem && <AttendanceDesigner doc={previewItem} candidats={candidats} tasks={tasks} ws={ws} onClose={() => setPreviewItem(null)} />}
+      {ficheTechItem && <FicheTechniqueDesigner doc={ficheTechItem} candidats={candidats} tasks={tasks} onClose={() => setFicheTechItem(null)} />}
+      {recapItem && <RecapitulatifDesigner doc={recapItem} candidats={candidats} tasks={tasks} onClose={() => setRecapItem(null)} />}
+      {syntheseCoutsItem && <SyntheseCoutsDesigner doc={syntheseCoutsItem} candidats={candidats} tasks={tasks} onClose={() => setSyntheseCoutsItem(null)} />}
 
       {/* ── En-tête ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-        <FolderOpen style={{ width: 24, height: 24, color: T.pageSub, strokeWidth: 1.6 }} />
-        <h1 style={{ fontSize: 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em", margin: 0 }}>
+        <FolderOpen style={{ width: isMobile ? 20 : 24, height: isMobile ? 20 : 24, color: T.pageSub, strokeWidth: 1.6 }} />
+        <h1 style={{ fontSize: isMobile ? 22 : isTablet ? 26 : 32, fontWeight: 800, color: T.pageText, letterSpacing: "-0.04em", margin: 0 }}>
           Documents
         </h1>
       </div>
-      <div style={{ fontSize: 13, color: T.pageSub, marginBottom: 28 }}>
+      <div style={{ fontSize: 13, color: T.pageSub, marginBottom: isMobile ? 16 : 28 }}>
         {documents.length} document{documents.length !== 1 ? "s" : ""}
       </div>
 
       {/* ── Filtres & toolbar ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-        {[{ key: "Tous" }, ...DOC_TYPES.map(t => ({ key: t }))]
+
+        {/* Onglets type — masqués sur mobile (trop nombreux) */}
+        {!isMobile && [{ key: "Tous" }, ...DOC_TYPES.map(t => ({ key: t }))]
           .filter(f => f.key === "Tous" || documents.some(d => d.type === f.key))
           .map(f => (
             <button key={f.key} onClick={() => setFilter(f.key)} style={{
@@ -10316,27 +10444,49 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
             </button>
           ))
         }
-        <div style={{ height: 16, width: 1, background: T.pageBdr }} />
-        <div style={{ display: "flex", border: `1px solid ${T.pageBdr}`, borderRadius: 4, overflow: "hidden" }}>
-          {[["table", "≡ Table"], ["grid", "⊞ Galerie"]].map(([v, icon]) => (
-            <button key={v} onClick={() => setView(v)} style={{
-              padding: "3px 10px", border: "none",
-              background: view === v ? "rgba(55,53,47,0.1)" : "transparent",
-              cursor: "pointer", fontSize: 13,
-              color: view === v ? T.pageText : T.pageSub, fontFamily: "inherit",
-            }}>{icon}</button>
-          ))}
-        </div>
+
+        {/* Sur mobile : select natif pour le filtre type */}
+        {isMobile && (
+          <select value={filter} onChange={e => setFilter(e.target.value)} style={{
+            padding: "4px 8px", borderRadius: 4, border: `1px solid ${T.pageBdr}`,
+            fontSize: 13, color: T.pageText, fontFamily: "inherit", background: "#fff",
+            cursor: "pointer",
+          }}>
+            <option value="Tous">Tous</option>
+            {DOC_TYPES.filter(t => documents.some(d => d.type === t)).map(t => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        )}
+
+        {!isMobile && <div style={{ height: 16, width: 1, background: T.pageBdr }} />}
+
+        {/* Toggle table/grille — masqué sur mobile (grid par défaut) */}
+        {!isMobile && (
+          <div style={{ display: "flex", border: `1px solid ${T.pageBdr}`, borderRadius: 4, overflow: "hidden" }}>
+            {[["table", "≡ Table"], ["grid", "⊞ Galerie"]].map(([v, icon]) => (
+              <button key={v} onClick={() => setView(v)} style={{
+                padding: "3px 10px", border: "none",
+                background: view === v ? "rgba(55,53,47,0.1)" : "transparent",
+                cursor: "pointer", fontSize: 13,
+                color: view === v ? T.pageText : T.pageSub, fontFamily: "inherit",
+              }}>{icon}</button>
+            ))}
+          </div>
+        )}
+
+        {/* Recherche */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, height: 26, padding: "0 9px", border: `1px solid ${T.pageBdr}`, borderRadius: 4 }}>
           <Search style={{ width: 12, height: 12, color: T.pageTer }} />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher…"
-            style={{ fontSize: 13, border: "none", outline: "none", color: T.pageText, fontFamily: "inherit", width: 100, background: "transparent" }} />
+            style={{ fontSize: 13, border: "none", outline: "none", color: T.pageText, fontFamily: "inherit", width: isMobile ? 80 : 100, background: "transparent" }} />
           {search && (
             <button onClick={() => setSearch("")} style={{ border: "none", background: "none", cursor: "pointer", color: T.pageTer, display: "flex", padding: 0 }}>
               <X style={{ width: 10, height: 10 }} />
             </button>
           )}
         </div>
+
         <button onClick={() => setModal("new")} style={{
           display: "flex", alignItems: "center", gap: 5, height: 26, padding: "0 10px",
           fontSize: 13, fontWeight: 500, color: "#fff", background: "#37352f",
@@ -10345,58 +10495,57 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
           onMouseEnter={e => e.currentTarget.style.background = "#111"}
           onMouseLeave={e => e.currentTarget.style.background = "#37352f"}
         >
-          <Plus style={{ width: 13, height: 13 }} /> Nouveau
+          <Plus style={{ width: 13, height: 13 }} />
+          {!isMobile && " Nouveau"}
         </button>
       </div>
 
-      {/* ── Contenu ── */}
+      {/* ── Contenu vide ── */}
       {filtered.length === 0 ? (
         <div style={{ textAlign: "center", padding: "80px 0" }}>
           <FolderOpen style={{ width: 36, height: 36, color: T.pageTer, margin: "0 auto 12px", display: "block", strokeWidth: 1.4 }} />
           <div style={{ fontSize: 15, fontWeight: 600, color: T.pageText }}>Aucun document</div>
         </div>
 
-      ) : view === "grid" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 8 }}>
+      ) : (view === "grid" || isMobile) ? (
+        /* ── Vue Grille (+ mobile forcé en grille) ── */
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(auto-fill,minmax(140px,1fr))" : "repeat(auto-fill,minmax(180px,1fr))", gap: isMobile ? 6 : 8 }}>
           {filtered.map(doc => {
             const ds = DOC_STATUS.find(s => s.key === doc.statut) || DOC_STATUS[0];
             return (
               <div key={doc.id} style={{
-                border: `1px solid ${T.pageBdr}`, borderRadius: 4, background: "#fff", padding: 14,
-                transition: "border-color 0.1s,box-shadow 0.1s",
+                border: `1px solid ${T.pageBdr}`, borderRadius: 4, background: "#fff",
+                padding: isMobile ? 10 : 14, transition: "border-color 0.1s,box-shadow 0.1s",
               }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(55,53,47,0.25)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)"; }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = T.pageBdr; e.currentTarget.style.boxShadow = "none"; }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 4, background: `${DOC_COLOR[doc.type] || "#787774"}12`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <DocIcon type={doc.type} size={16} />
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 4, background: `${DOC_COLOR[doc.type] || "#787774"}12`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <DocIcon type={doc.type} size={14} />
                   </div>
                   <div style={{ display: "flex", gap: 1 }}>
-
-                    {/* ── Bouton émargement ── */}
                     {isEmargement(doc) && (
-                      <button
-                        onClick={() => setPreviewItem(doc)}
-                        title="Aperçu avant impression"
-                        style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#448361", color: "#fff", cursor: "pointer" }}
-                      >
-                        <Printer style={{ width: 12, height: 12 }} />
+                      <button onClick={() => setPreviewItem(doc)} title="Aperçu" style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#448361", color: "#fff", cursor: "pointer" }}>
+                        <Printer style={{ width: 11, height: 11 }} />
                       </button>
                     )}
-
-                    {/* ── Bouton fiche technique ── */}
                     {isFicheTech(doc) && (
-                      <button
-                        onClick={() => setFicheTechItem(doc)}
-                        title="Ouvrir la fiche F2"
-                        style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#d9730d", color: "#fff", cursor: "pointer" }}
-                      >
-                        <Printer style={{ width: 12, height: 12 }} />
+                      <button onClick={() => setFicheTechItem(doc)} title="Fiche F2" style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#d9730d", color: "#fff", cursor: "pointer" }}>
+                        <Printer style={{ width: 11, height: 11 }} />
                       </button>
                     )}
-
-                    {doc.lien && (
+                    {isRecap(doc) && (
+                      <button onClick={() => setRecapItem(doc)} title="Récapitulatif" style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#0f7ddb", color: "#fff", cursor: "pointer" }}>
+                        <Printer style={{ width: 11, height: 11 }} />
+                      </button>
+                    )}
+                    {isSyntheseCouts(doc) && (
+                      <button onClick={() => setSyntheseCoutsItem(doc)} title="Synthèse coûts" style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#448361", color: "#fff", cursor: "pointer" }}>
+                        <Printer style={{ width: 11, height: 11 }} />
+                      </button>
+                    )}
+                    {!isMobile && doc.lien && (
                       <a href={doc.lien} target="_blank" rel="noopener" style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, color: T.pageTer, textDecoration: "none" }}
                         onMouseEnter={e => e.currentTarget.style.background = T.pageHov}
                         onMouseLeave={e => e.currentTarget.style.background = "transparent"}
@@ -10418,7 +10567,7 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
                     </button>
                   </div>
                 </div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.pageText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 6 }}>
+                <div style={{ fontSize: isMobile ? 12 : 13, fontWeight: 600, color: T.pageText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 6 }}>
                   {doc.nom}
                 </div>
                 <Tag label={doc.statut} scheme={{ text: ds.text, bg: ds.bg }} />
@@ -10431,10 +10580,10 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
         </div>
 
       ) : (
-        /* ── Vue Table ── */
+        /* ── Vue Table (desktop + tablette) ── */
         <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 4, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr 1fr 80px", background: "rgba(55,53,47,0.03)", borderBottom: `1px solid ${T.pageBdr}`, padding: "0 16px" }}>
-            {["Document", "Type", "Date", "Statut", ""].map(h => (
+          <div style={{ display: "grid", gridTemplateColumns: tableColumns, background: "rgba(55,53,47,0.03)", borderBottom: `1px solid ${T.pageBdr}`, padding: "0 16px" }}>
+            {tableHeaders.map(h => (
               <div key={h} style={{ padding: "7px 0", fontSize: 10, fontWeight: 600, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</div>
             ))}
           </div>
@@ -10442,69 +10591,59 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
             const ds = DOC_STATUS.find(s => s.key === doc.statut) || DOC_STATUS[0];
             return (
               <div key={doc.id} style={{
-                display: "grid", gridTemplateColumns: "3fr 1fr 1fr 1fr 80px",
+                display: "grid", gridTemplateColumns: tableColumns,
                 padding: "0 16px", borderBottom: i < filtered.length - 1 ? `1px solid ${T.pageBdr}` : "none",
                 alignItems: "center", background: "#fff", transition: "background 0.06s",
               }}
                 onMouseEnter={e => e.currentTarget.style.background = T.pageHov}
                 onMouseLeave={e => e.currentTarget.style.background = "#fff"}
               >
+                {/* Colonne Nom — toujours visible */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0" }}>
                   <div style={{ width: 28, height: 28, borderRadius: 4, background: `${DOC_COLOR[doc.type] || "#787774"}12`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                     <DocIcon type={doc.type} size={14} />
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: T.pageText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.nom}</div>
-                    {doc.notes && <div style={{ fontSize: 11, color: T.pageSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.notes}</div>}
+                    {/* Sur tablette : type affiché sous le nom */}
+                    {isTablet && !isMobile && (
+                      <div style={{ fontSize: 11, color: T.pageSub }}>{doc.type}{doc.dateDoc ? ` · ${fmtFr(doc.dateDoc)}` : ""}</div>
+                    )}
+                    {doc.notes && !isTablet && <div style={{ fontSize: 11, color: T.pageSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.notes}</div>}
                   </div>
                 </div>
-                <span style={{ fontSize: 12, color: T.pageSub }}>{doc.type}</span>
-                <span style={{ fontSize: 12, color: T.pageSub }}>{doc.dateDoc ? fmtFr(doc.dateDoc) : "—"}</span>
+
+                {/* Type — desktop seulement */}
+                {!isTablet && <span style={{ fontSize: 12, color: T.pageSub }}>{doc.type}</span>}
+
+                {/* Date — desktop seulement */}
+                {!isTablet && <span style={{ fontSize: 12, color: T.pageSub }}>{doc.dateDoc ? fmtFr(doc.dateDoc) : "—"}</span>}
+
+                {/* Statut — desktop + tablette */}
                 <div><Tag label={doc.statut} scheme={{ text: ds.text, bg: ds.bg }} /></div>
+
+                {/* Actions */}
                 <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
-
-                  {/* ── Bouton émargement ── */}
                   {isEmargement(doc) && (
-                    <button
-                      onClick={() => setPreviewItem(doc)}
-                      title="Aperçu avant impression"
-                      style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#448361", color: "#fff", cursor: "pointer" }}
-                    >
+                    <button onClick={() => setPreviewItem(doc)} title="Aperçu" style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#448361", color: "#fff", cursor: "pointer" }}>
                       <Printer style={{ width: 12, height: 12 }} />
                     </button>
                   )}
-
-                  {/* ── Bouton fiche technique ── */}
                   {isFicheTech(doc) && (
-                    <button
-                      onClick={() => setFicheTechItem(doc)}
-                      title="Ouvrir la fiche F2"
-                      style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#d9730d", color: "#fff", cursor: "pointer" }}
-                    >
+                    <button onClick={() => setFicheTechItem(doc)} title="Fiche F2" style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#d9730d", color: "#fff", cursor: "pointer" }}>
                       <Printer style={{ width: 12, height: 12 }} />
                     </button>
                   )}
-
                   {isRecap(doc) && (
-  <button
-    onClick={() => setRecapItem(doc)}
-    title="Ouvrir le récapitulatif"
-    style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#0f7ddb", color: "#fff", cursor: "pointer" }}
-  >
-    <Printer style={{ width: 12, height: 12 }} />
-  </button>
-)}
-
-{isSyntheseCouts(doc) && (
-  <button
-    onClick={() => setSyntheseCoutsItem(doc)}
-    title="Ouvrir la synthèse des coûts"
-    style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#448361", color: "#fff", cursor: "pointer" }}
-  >
-    <Printer style={{ width: 12, height: 12 }} />
-  </button>
-)}
-
+                    <button onClick={() => setRecapItem(doc)} title="Récapitulatif" style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#0f7ddb", color: "#fff", cursor: "pointer" }}>
+                      <Printer style={{ width: 12, height: 12 }} />
+                    </button>
+                  )}
+                  {isSyntheseCouts(doc) && (
+                    <button onClick={() => setSyntheseCoutsItem(doc)} title="Synthèse coûts" style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "#448361", color: "#fff", cursor: "pointer" }}>
+                      <Printer style={{ width: 12, height: 12 }} />
+                    </button>
+                  )}
                   {doc.lien && (
                     <a href={doc.lien} target="_blank" rel="noopener" style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, color: T.pageTer, textDecoration: "none" }}
                       onMouseEnter={e => e.currentTarget.style.background = T.pageHov}
@@ -10941,10 +11080,15 @@ function ProfileView({ currentUser, onSave, showToast }) {
    APP ROOT
 ========================================================== */
 export default function App() {
+  const { w } = useWindowSize(); // ← hook responsive
+  const isMobile = w < 640;
+  const isTablet = w >= 640 && w < 1024;
+
   const [workspaces, setWorkspaces] = useState([]);
   const [activeWs, setActiveWs] = useState(null);
   const [section, setSection] = useState("overview");
-  const [sideOpen, setSideOpen] = useState(true);
+  // Sur desktop : ouvert par défaut / Sur mobile-tablet : fermé par défaut
+  const [sideOpen, setSideOpen] = useState(w >= 1024);
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [wsDataLoading, setWsDataLoading] = useState(false);
@@ -10955,13 +11099,22 @@ export default function App() {
   const { show: showToast, ToastContainer } = useToast();
   const { currentUser, updateProfile, logout } = useAuth();
 
+  // ── Fermer la sidebar automatiquement quand on passe en mobile ──
+  useEffect(() => {
+    if (isMobile || isTablet) {
+      setSideOpen(false);
+    } else {
+      setSideOpen(true);
+    }
+  }, [isMobile, isTablet]);
+
   const extractArray = (r, key) => {
     if (Array.isArray(r)) return r;
     if (r && Array.isArray(r[key])) return r[key];
     if (r && Array.isArray(r.data)) return r.data;
     if (r && Array.isArray(r.items)) return r.items;
     if (r && Array.isArray(r.docs)) return r.docs;
-    if (r && typeof r === 'object') {
+    if (r && typeof r === "object") {
       const found = Object.values(r).find(Array.isArray);
       if (found) return found;
     }
@@ -10973,7 +11126,7 @@ export default function App() {
     (async () => {
       try {
         const res = await apiFetch("/workspaces");
-        const ws = normArr(extractArray(res, 'workspaces'));
+        const ws = normArr(extractArray(res, "workspaces"));
         setWorkspaces(ws);
         if (ws.length > 0) setActiveWs(ws[0].id);
         setApiOnline(true);
@@ -10992,54 +11145,42 @@ export default function App() {
       try {
         const [tasks, cands, docs] = await Promise.all([
           apiFetch(`/workspaces/${activeWs}/tasks`).then(r => {
-            const all = normArr(extractArray(r, 'tasks'));
+            const all = normArr(extractArray(r, "tasks"));
             const seen = new Map();
             all.forEach(t => {
-              // Extraction intelligente du groupe pour la clé
               let grp = String(t.groupe || "").trim();
               if (!grp && t.name?.includes(" — Grp ")) grp = t.name.split(" — Grp ")[1];
               if (!grp) grp = "1";
-
               const key = `${(t.group || "").trim()}||${grp}`;
-
-              // On garde la tâche la plus récente ou la première trouvée
-              if (!seen.has(key)) {
-                seen.set(key, t);
-              }
+              if (!seen.has(key)) seen.set(key, t);
             });
             return Array.from(seen.values());
           }),
           apiFetch(`/workspaces/${activeWs}/candidats`).then(async r => {
-            // Détection pagination
-            const firstPage = normArr(extractArray(r, 'candidats'));
+            const firstPage = normArr(extractArray(r, "candidats"));
             const total = r?.total ?? r?.count ?? null;
             const limit = r?.limit ?? firstPage.length;
-
             let all = [...firstPage];
-
             if (total && limit && total > limit) {
               const totalPages = Math.ceil(total / limit);
               const pagePromises = [];
               for (let page = 2; page <= totalPages; page++) {
                 pagePromises.push(
                   apiFetch(`/workspaces/${activeWs}/candidats?page=${page}&limit=${limit}`)
-                    .then(pr => normArr(extractArray(pr, 'candidats')))
+                    .then(pr => normArr(extractArray(pr, "candidats")))
                     .catch(() => [])
                 );
               }
               const extraPages = await Promise.all(pagePromises);
               extraPages.forEach(p => all.push(...p));
             }
-
             if (!total && firstPage.length > 0 && firstPage.length <= 32) {
               try {
                 const bigR = await apiFetch(`/workspaces/${activeWs}/candidats?limit=10000`);
-                const bigAll = normArr(extractArray(bigR, 'candidats'));
+                const bigAll = normArr(extractArray(bigR, "candidats"));
                 if (bigAll.length > firstPage.length) all = bigAll;
-              } catch (e) { }
+              } catch (e) {}
             }
-
-            // Déduplication
             const seen = new Map();
             all.forEach(c => {
               const key = `${String(c.nom || "").trim().toLowerCase()}__${String(c.prenom || "").trim().toLowerCase()}__${(c.theme || "").trim()}__${c.groupe || ""}`;
@@ -11047,7 +11188,7 @@ export default function App() {
             });
             return Array.from(seen.values());
           }),
-          apiFetch(`/workspaces/${activeWs}/documents`).then(r => normArr(extractArray(r, 'documents'))),
+          apiFetch(`/workspaces/${activeWs}/documents`).then(r => normArr(extractArray(r, "documents"))),
         ]);
         setAllT(p => ({ ...p, [activeWs]: tasks }));
         setAllC(p => ({ ...p, [activeWs]: cands }));
@@ -11063,24 +11204,23 @@ export default function App() {
 
   const ws = workspaces.find(w => w.id === activeWs);
   const currentWs = workspaces.find(w => w.id === activeWs);
-  const tasks = allT[activeWs] || [], cands = allC[activeWs] || [], docs = allD[activeWs] || [];
-  const mk = (setter, key) => u => setter(p => { const cur = p[key] || []; return { ...p, [key]: typeof u === "function" ? u(cur) : u }; });
-  const setT = mk(setAllT, activeWs), setC = mk(setAllC, activeWs), setD = mk(setAllD, activeWs);
+  const tasks = allT[activeWs] || [];
+  const cands = allC[activeWs] || [];
+  const docs  = allD[activeWs] || [];
+  const mk = (setter, key) => u => setter(p => {
+    const cur = p[key] || [];
+    return { ...p, [key]: typeof u === "function" ? u(cur) : u };
+  });
+  const setT = mk(setAllT, activeWs);
+  const setC = mk(setAllC, activeWs);
+  const setD = mk(setAllD, activeWs);
 
   const createWs = async data => {
     try {
-      const raw = await apiFetch("/workspaces", {
-        method: "POST",
-        body: { ...data, name: data.company }
-      });
-
-      // L'API peut retourner { data: {...} } ou { workspace: {...} } ou directement l'objet
+      const raw = await apiFetch("/workspaces", { method: "POST", body: { ...data, name: data.company } });
       const wsRaw = raw?.workspace || raw?.data || raw;
       const created = norm(wsRaw);
-
-      // Forcer company depuis name si absent
       if (!created.company && created.name) created.company = created.name;
-
       setWorkspaces(p => [...p, created]);
       setAllT(p => ({ ...p, [created.id]: [] }));
       setAllC(p => ({ ...p, [created.id]: [] }));
@@ -11103,100 +11243,218 @@ export default function App() {
       setActiveWs(remaining.length > 0 ? remaining[0].id : null);
       setSection("overview");
       showToast("Workspace supprimé", "success");
-    } catch (e) { showToast("Erreur suppression workspace : " + e.message); }
+    } catch (e) {
+      showToast("Erreur suppression workspace : " + e.message);
+    }
   };
 
-  // Dans App.js
-const updateWs = updatedRaw => {
-  const updated = norm(updatedRaw); // S'assurer que norm() gère hasExportBase
-  
-  setWorkspaces(prevWorkspaces => {
-    // On crée un NOUVEAU tableau (important pour que React voit le changement)
-    return prevWorkspaces.map(w => {
-      if (w.id === updated.id) {
-        return { ...w, ...updated }; // On remplace par les nouvelles données du serveur
-      }
-      return w;
-    });
-  });
-};
-
+  const updateWs = updatedRaw => {
+    const updated = norm(updatedRaw);
+    setWorkspaces(prev => prev.map(w => w.id === updated.id ? { ...w, ...updated } : w));
+  };
 
   const navLabel = NAV.find(n => n.key === section)?.label || (section === "profile" ? "Mon Profil" : "");
+
+  // ── Largeur effective de la sidebar (0 sur mobile/tablet quand fermée) ──
+  const sidebarEffectiveWidth = sideOpen && !isMobile && !isTablet ? 240 : 0;
 
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#fff", gap: 12 }}>
       <Spinner size={24} color={T.accent} />
-      <span style={{ fontSize: 15, color: T.pageSub, fontFamily: "-apple-system,'Segoe UI',sans-serif" }}>Connexion au serveur…</span>
+      <span style={{ fontSize: 15, color: T.pageSub, fontFamily: "-apple-system,'Segoe UI',sans-serif" }}>
+        Connexion au serveur…
+      </span>
     </div>
   );
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "#fff", fontFamily: "-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif", overflow: "hidden" }}>
       <style>{`
-        *{box-sizing:border-box;}
-        ::-webkit-scrollbar{width:6px;height:6px;}
-        ::-webkit-scrollbar-track{background:transparent;}
-        ::-webkit-scrollbar-thumb{background:rgba(55,53,47,0.18);border-radius:99px;}
-        ::-webkit-scrollbar-thumb:hover{background:rgba(55,53,47,0.32);}
-        input[type=date]::-webkit-calendar-picker-indicator{opacity:0.4;cursor:pointer;}
-        @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes spin{to{transform:rotate(360deg)}}
-        @keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(55,53,47,0.18); border-radius: 99px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(55,53,47,0.32); }
+        input[type=date]::-webkit-calendar-picker-indicator { opacity: 0.4; cursor: pointer; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
+
       <ToastContainer />
-{showCreate && (
-  <WsModal
-    onClose={() => setShowCreate(false)}
-    onCreate={async (data) => {
-      const res = await apiFetch("/workspaces", { method: "POST", body: data });
-      const ws = res.data || res;
-      ws.id = ws._id || ws.id;
-      ws.company = ws.name;
-      setWorkspaces(prev => [ws, ...prev]);
-      setActiveWs(ws.id);
-      return ws;  // ← seul ajout
-    }}
-  />
-)}      
-<Sidebar workspaces={workspaces} activeWs={activeWs} onSelectWs={id => { setActiveWs(id); setSection("overview"); }} section={section} onSection={setSection} onCreateWs={() => setShowCreate(true)} open={sideOpen} apiOnline={apiOnline} currentUser={currentUser} onLogout={logout} />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", marginLeft: sideOpen ? 240 : 0, transition: "margin-left 0.2s ease", minWidth: 0, overflow: "hidden" }}>
-        <div style={{ height: 44, display: "flex", alignItems: "center", padding: "0 12px", gap: 2, flexShrink: 0, borderBottom: `1px solid ${T.pageBdr}`, background: "#fff" }}>
-          <button onClick={() => setSideOpen(v => !v)} style={{ width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }} onMouseEnter={e => e.currentTarget.style.background = T.pageHov} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>{sideOpen ? <PanelLeftClose style={{ width: 15, height: 15 }} /> : <PanelLeftOpen style={{ width: 15, height: 15 }} />}</button>
-          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: T.pageSub, marginLeft: 4 }}>
-            {ws && <><span style={{ color: T.pageSub }}>{ws.company}</span><ChevronRight style={{ width: 11, height: 11, color: T.pageTer, flexShrink: 0 }} /></>}
-            <span style={{ color: T.pageText, fontWeight: 500 }}>{navLabel}</span>
+
+      {/* ── Modal création workspace ── */}
+      {showCreate && (
+        <WsModal
+          onClose={() => setShowCreate(false)}
+          onCreate={async data => {
+            const res = await apiFetch("/workspaces", { method: "POST", body: data });
+            const ws = res.data || res;
+            ws.id = ws._id || ws.id;
+            ws.company = ws.name;
+            setWorkspaces(prev => [ws, ...prev]);
+            setActiveWs(ws.id);
+            return ws;
+          }}
+        />
+      )}
+
+      {/* ── Sidebar responsive ── */}
+      <Sidebar
+        workspaces={workspaces}
+        activeWs={activeWs}
+        onSelectWs={id => { setActiveWs(id); setSection("overview"); }}
+        section={section}
+        onSection={setSection}
+        onCreateWs={() => setShowCreate(true)}
+        open={sideOpen}
+        onToggle={() => setSideOpen(v => !v)}   // ← nouveau prop
+        apiOnline={apiOnline}
+        currentUser={currentUser}
+        onLogout={logout}
+      />
+
+      {/* ── Contenu principal ── */}
+      <div style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        // Sur desktop la sidebar pousse le contenu, sur mobile elle flotte par-dessus
+        marginLeft: sidebarEffectiveWidth,
+        transition: "margin-left 0.2s ease",
+        minWidth: 0,
+        overflow: "hidden",
+      }}>
+
+        {/* ── Topbar ── */}
+        <div style={{
+          height: 44,
+          display: "flex",
+          alignItems: "center",
+          padding: "0 12px",
+          gap: 2,
+          flexShrink: 0,
+          borderBottom: `1px solid ${T.pageBdr}`,
+          background: "#fff",
+        }}>
+          {/* Bouton toggle sidebar */}
+          <button
+            onClick={() => setSideOpen(v => !v)}
+            style={{
+              width: 28, height: 28,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              borderRadius: 4, border: "none", background: "transparent",
+              cursor: "pointer", color: T.pageTer,
+              flexShrink: 0,
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = T.pageHov}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+          >
+            {sideOpen
+              ? <PanelLeftClose style={{ width: 15, height: 15 }} />
+              : <PanelLeftOpen  style={{ width: 15, height: 15 }} />
+            }
+          </button>
+
+          {/* Breadcrumb */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: T.pageSub, marginLeft: 4, minWidth: 0, overflow: "hidden" }}>
+            {ws && (
+              <>
+                <span style={{ color: T.pageSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: isMobile ? 80 : 200 }}>
+                  {ws.company}
+                </span>
+                <ChevronRight style={{ width: 11, height: 11, color: T.pageTer, flexShrink: 0 }} />
+              </>
+            )}
+            <span style={{ color: T.pageText, fontWeight: 500, whiteSpace: "nowrap" }}>{navLabel}</span>
           </div>
-          {!apiOnline && <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 4, background: "rgba(212,76,71,0.08)", border: `1px solid rgba(212,76,71,0.2)` }}><AlertCircle style={{ width: 12, height: 12, color: "#d44c47" }} /><span style={{ fontSize: 11, color: "#d44c47", fontWeight: 500 }}>Hors ligne</span></div>}
-          {wsDataLoading && <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: T.pageSub }}><Spinner size={13} color={T.accent} />Chargement…</div>}
+
+          {/* Indicateurs droite */}
+          {!apiOnline && (
+            <div style={{
+              marginLeft: "auto", display: "flex", alignItems: "center", gap: 5,
+              padding: "3px 10px", borderRadius: 4,
+              background: "rgba(212,76,71,0.08)", border: "1px solid rgba(212,76,71,0.2)",
+              flexShrink: 0,
+            }}>
+              <AlertCircle style={{ width: 12, height: 12, color: "#d44c47" }} />
+              {!isMobile && <span style={{ fontSize: 11, color: "#d44c47", fontWeight: 500 }}>Hors ligne</span>}
+            </div>
+          )}
+          {wsDataLoading && (
+            <div style={{
+              marginLeft: apiOnline ? "auto" : 8,
+              display: "flex", alignItems: "center", gap: 6,
+              fontSize: 12, color: T.pageSub, flexShrink: 0,
+            }}>
+              <Spinner size={13} color={T.accent} />
+              {!isMobile && "Chargement…"}
+            </div>
+          )}
         </div>
+
+        {/* ── Pages ── */}
         <div style={{ flex: 1, overflowY: "auto", position: "relative" }}>
-          <div style={{ display: section === "overview" ? "block" : "none" }}>
-            <Overview ws={ws} tasks={tasks} candidats={cands} documents={docs} onSection={setSection} loading={wsDataLoading} onDeleteWs={deleteWs} onUpdateWs={updateWs} />
+          <div style={{ display: section === "overview"  ? "block" : "none" }}>
+            <Overview
+              ws={ws}
+              tasks={tasks}
+              candidats={cands}
+              documents={docs}
+              onSection={setSection}
+              loading={wsDataLoading}
+              onDeleteWs={deleteWs}
+              onUpdateWs={updateWs}
+            />
           </div>
           <div style={{ display: section === "gantt" ? "block" : "none" }}>
-            <GanttView 
-            wsWorkingDays={currentWs?.workingDays}
-            wsSkipHolidays={currentWs?.skipHolidays}
-wsVacances={currentWs?.vacances}
-onUpdateWs={updatedWs => setWorkspaces(prev => prev.map(w => w.id === updatedWs.id ? updatedWs : w))}
-  tasks={tasks} 
-  setTasks={setT} 
-  setCandidats={setC} // Ajouté
-  setDocuments={setD} // Ajouté
-  wsId={activeWs} 
-  showToast={showToast} 
-  candidats={cands} 
-/>
+            <GanttView
+              wsWorkingDays={currentWs?.workingDays}
+              wsSkipHolidays={currentWs?.skipHolidays}
+              wsVacances={currentWs?.vacances}
+              onUpdateWs={updatedWs => setWorkspaces(prev => prev.map(w => w.id === updatedWs.id ? updatedWs : w))}
+              tasks={tasks}
+              setTasks={setT}
+              setCandidats={setC}
+              setDocuments={setD}
+              wsId={activeWs}
+              showToast={showToast}
+              candidats={cands}
+              ws={ws}
+            />
           </div>
           <div style={{ display: section === "candidats" ? "block" : "none", flex: 1, overflowY: "auto", position: "relative" }}>
-            <CandidatsView currentUser={currentUser} candidats={cands} setCandidats={setC} tasks={tasks} setTasks={setT} ws={ws} wsId={activeWs} showToast={showToast} setDocuments={setD} onUpdateWs={updateWs} />
+            <CandidatsView
+              currentUser={currentUser}
+              candidats={cands}
+              setCandidats={setC}
+              tasks={tasks}
+              setTasks={setT}
+              ws={ws}
+              wsId={activeWs}
+              showToast={showToast}
+              setDocuments={setD}
+              onUpdateWs={updateWs}
+            />
           </div>
           <div style={{ display: section === "documents" ? "block" : "none", flex: 1, overflowY: "auto", position: "relative" }}>
-            <DocsView currentUser={currentUser} documents={docs} candidats={cands} tasks={tasks} setDocuments={setD} wsId={activeWs} showToast={showToast} ws={ws} />
+            <DocsView
+              currentUser={currentUser}
+              documents={docs}
+              candidats={cands}
+              tasks={tasks}
+              setDocuments={setD}
+              wsId={activeWs}
+              showToast={showToast}
+              ws={ws}
+            />
           </div>
           <div style={{ display: section === "profile" ? "block" : "none", flex: 1, overflowY: "auto", position: "relative" }}>
-            <ProfileView currentUser={currentUser} onSave={updateProfile} showToast={showToast} />
+            <ProfileView
+              currentUser={currentUser}
+              onSave={updateProfile}
+              showToast={showToast}
+            />
           </div>
         </div>
       </div>
