@@ -19,7 +19,7 @@ import {
   ArrowDown,
   ChevronUp,
   Upload, FileUp, AlertCircle, Wand2, Shuffle, ArrowRight, CheckCheck, ClipboardCheck, Printer, Eye, LayoutTemplate, AlignLeft, AlignCenter, AlignRight, Bold, Italic, Image as ImageIcon, Type, Table2, Minus,
-  UserCog, GanttChart 
+  UserCog, GanttChart ,MapPin,Banknote
 } from "lucide-react";
 
 import jsPDF from "jspdf";
@@ -2052,13 +2052,13 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
         );
       })()}
 
-      {divider}
+      {/* {divider} */}
 
       {/* Tâches récentes */}
       {tasks.length > 0 && (
         <>
-          <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>Tâches récentes</div>
-          <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:4, overflow:"hidden", marginBottom:32 }}>
+          <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 , display:'none' }}>Tâches récentes</div>
+          <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:4, overflow:"hidden", marginBottom:32,display:'none' }}>
             {tasks.slice(0,5).map((t, i) => (
               <div key={t.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"8px 14px", borderBottom: i < Math.min(tasks.length,5)-1 ? `1px solid ${T.pageBdr}` : "none", background: i%2===0?"#fff":"rgba(55,53,47,0.015)" }}>
                 <span style={{ fontSize:11, color:T.pageTer, fontFamily:"monospace", width:20, textAlign:"right", flexShrink:0 }}>{i+1}</span>
@@ -2074,8 +2074,8 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
       {/* Candidats récents */}
       {candidats.length > 0 && (
         <>
-          <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>Candidats récents</div>
-          <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:4, overflow:"hidden" }}>
+          <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 ,display:'none'}}>Candidats récents</div>
+          <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:4, overflow:"hidden",display:'none' }}>
             {candidats.slice(0,4).map((c, i) => {
               const st = C_STATUS.find(s => s.key === c.statut) || C_STATUS[0];
               return (
@@ -2248,7 +2248,7 @@ const BackgroundStripes = memo(function BackgroundStripes({ totalDays, projStart
   );
 });
 
-const GRow = memo(function GRow({ task, SC, cs, zoom, projStart, totalDays, todayOff, wd, sh, vacs, onEdit, onDelete, onUpdate, onUpdateSlot, registerScrollable, unregisterScrollable, slotMap, isLiveConflict, conflictTypes, wdays, prog, candidatCount }) {
+const GRow = memo(function GRow({ task, SC, cs, zoom, projStart, totalDays, todayOff, wd, sh, vacs, onEdit, onDelete, onUpdate, onUpdateSlot, registerScrollable, unregisterScrollable, slotMap, isLiveConflict, conflictTypes, wdays, prog, candidatCount, onOpenDrawer  }) {
   const [hov, setHov] = useState(false);
   
   // ── Lookup par key (fix responsive) ──
@@ -2302,7 +2302,7 @@ const GRow = memo(function GRow({ task, SC, cs, zoom, projStart, totalDays, toda
             ? <div style={{ width:7,height:7,borderRadius:"50%",background:dot,flexShrink:0,boxShadow:`0 0 0 2px ${dot}33`,animation:conflictTypes?.has("overlap")?"pulse-conflict 1.5s ease-in-out infinite":"none" }} />
             : <div style={{ width:8,height:8,borderRadius:2,background:pal.text,flexShrink:0 }} />
           }
-          <span style={{ fontSize:13,fontWeight:600,color:T.pageText,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }} title={task.group}>{task.group}</span>
+          <span style={{ fontSize:13,fontWeight:600,color:T.pageText,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }} title={task.group} onClick={onOpenDrawer} onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"} onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>{task.group}</span>
           <div style={{ display:"flex",gap:1,flexShrink:0,opacity:hov?1:0,transition:"opacity 0.1s" }}>
             <button onClick={onEdit}   style={{ width:20,height:20,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3,border:"none",background:"transparent",cursor:"pointer",color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(55,53,47,0.1)";e.currentTarget.style.color=T.pageText;}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Edit2 style={{ width:11,height:11 }} /></button>
             <button onClick={onDelete} style={{ width:20,height:20,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3,border:"none",background:"transparent",cursor:"pointer",color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(212,76,71,0.1)";e.currentTarget.style.color="#d44c47";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Trash2 style={{ width:11,height:11 }} /></button>
@@ -2897,204 +2897,297 @@ function RichDatePicker({ value, onChange, min, wd, sh, vacs, groupRows, current
   );
 }
 
-function TaskDrawer({ task, candidats, metaCache, candidatCountByKey, conflictTypesMap, onClose, onEdit, onPrint  }) {
+function TaskDrawer({ task, candidats, metaCache, candidatCountByKey, conflictTypesMap, onClose, onEdit, onPrint, wsId, showToast, setCandidats }) {
+  const [isEditingInfo, setIsEditingInfo] = useState(false);
+  const [cabinet, setCabinet] = useState("");
+  const [lieu,    setLieu]    = useState("");
+  const [cout,    setCout]    = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
   if (!task) return null;
 
-  const cfKey   = `${(task.group||"").trim()}||${String(task.groupe||"")}`;
-  const meta    = metaCache[task.id] || { wdays: 0, prog: { pct: 0 } };
-  const cf      = conflictTypesMap?.[cfKey];
+  const cfKey = `${(task.group || "").trim()}||${String(task.groupe || "")}`;
+  const meta  = metaCache[task.id] || { wdays: 0, prog: { pct: 0 } };
+  const cf    = conflictTypesMap?.[cfKey];
   const hasConf = cf && cf.size > 0;
-  const pal     = grpTag(task.group);
+  const pal   = grpTag(task.group);
 
   const groupCandidats = candidats.filter(c =>
-    (c.theme||"").trim() === (task.group||"").trim() &&
-    String(c.groupe||"1") === String(task.groupe||"1")
+    (c.theme || "").trim() === (task.group || "").trim() &&
+    String(c.groupe || "1") === String(task.groupe || "1")
   );
 
+  useEffect(() => {
+    if (groupCandidats.length > 0) {
+      const first = groupCandidats[0];
+      setCabinet(first.cabinet || first.extraData?.cabinet || "");
+      setLieu(first.lieu    || first.extraData?.lieu    || "");
+      setCout(first.cout    || first.extraData?.cout    || "");
+    }
+  }, [task.id, groupCandidats.length]);
+
+  const handleSaveInfo = async () => {
+    setIsSaving(true);
+    const coutPourServeur = cout.replace(/\./g, "").replace(",", ".");
+    try {
+      await apiFetch(`/workspaces/${wsId}/gantt/group-extras`, {
+        method: "PATCH",
+        body: { theme: task.group, groupe: String(task.groupe), cabinet, lieu, cout: coutPourServeur },
+      });
+      if (setCandidats) {
+        setCandidats(prev => prev.map(c =>
+          c.theme === task.group && String(c.groupe) === String(task.groupe)
+            ? { ...c, cabinet, lieu, cout, extraData: { ...c.extraData, cabinet, lieu, cout } }
+            : c
+        ));
+      }
+      setIsEditingInfo(false);
+      showToast("Informations mises à jour", "success");
+    } catch (err) {
+      showToast("Erreur de sauvegarde : " + err.message, "error");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const formatCoutFR = (val) => {
+    if (val === undefined || val === null || val === "") return "";
+    let s = String(val).trim().replace(/[^\d.,]/g, "");
+    if (s.includes(",") && s.includes(".")) {
+      s = s.indexOf(".") < s.indexOf(",") ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
+    } else if (s.includes(",")) {
+      s = s.replace(",", ".");
+    }
+    const num = parseFloat(s);
+    if (isNaN(num)) return val;
+    return new Intl.NumberFormat("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+  };
+
   const C_STATUS_MAP = {
-    "Retenu":    { bg:"#edf3ec", text:"#448361", bd:"rgba(68,131,97,0.3)" },
-    "En attente":{ bg:"#faf3dd", text:"#cb912f", bd:"rgba(203,145,47,0.3)" },
-    "Refusé":    { bg:"#fbe8e8", text:"#d44c47", bd:"rgba(212,76,71,0.3)" },
+    "Retenu":    { bg: "#eaf3de", text: "#3b6d11", bd: "#c0dd97" },
+    "En attente":{ bg: "#faf3dd", text: "#854f0b", bd: "#fac775" },
+    "Refusé":    { bg: "#fcebeb", text: "#a32d2d", bd: "#f7c1c1" },
+  };
+
+  // ── Une palette par carte ──
+  const COLORS = {
+    cabinet: { bg: "#f0ebff", border: "#c9b8f7", label: "#6b3fcf", text: "#3b1d8f", icon: "#6b3fcf" },
+    lieu:    { bg: "#fff4e6", border: "#fbc97a", label: "#a85c00", text: "#6b3500", icon: "#c97200" },
+    cout:    { bg: "#e1f5ee", border: "#9fe1cb", label: "#0f6e56", text: "#085041", icon: "#0f6e56" },
+  };
+
+  const cardRow = (p) => ({
+    display: "flex", alignItems: "center", gap: 10,
+    padding: "10px 12px", borderRadius: 8,
+    background: p.bg, border: `1px solid ${p.border}`,
+  });
+
+  const iconBox = (p) => ({
+    width: 30, height: 30, borderRadius: 7,
+    background: "#fff", border: `1px solid ${p.border}`,
+    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+  });
+
+  const inputStyle = {
+    flex: 1, fontSize: 12, padding: "5px 9px",
+    border: "1px solid #e3e3e2", borderRadius: 5,
+    outline: "none", fontFamily: "inherit", color: "#37352f", background: "#fff",
   };
 
   return (
     <>
       {/* Overlay */}
-      <div
-        onClick={onClose}
-        style={{ position:"fixed",inset:0,zIndex:400,background:"rgba(0,0,0,0.18)" }}
-      />
+      <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:400, background:"rgba(0,0,0,0.2)" }}/>
 
-      {/* Drawer */}
       <div style={{
-  position:"fixed", top:0, right:0, bottom:0, zIndex:401,
-  width: 420, background:"#fff",
-  borderLeft:`1px solid rgba(55,53,47,0.12)`,
-  boxShadow:"-8px 0 32px rgba(0,0,0,0.08)",
-  display:"flex", flexDirection:"column",
-  overflow:"hidden",  // ← remplacez par hidden
-}}>
+        position:"fixed", top:0, right:0, bottom:0, zIndex:401,
+        width: 420, background:"#fff",
+        borderLeft:"1px solid #e3e3e2",
+        boxShadow:"-4px 0 24px rgba(0,0,0,0.08)",
+        display:"flex", flexDirection:"column", overflow:"hidden",
+      }}>
 
         {/* ── Header ── */}
-        <div style={{ padding:"20px 22px 16px", borderBottom:`1px solid rgba(55,53,47,0.1)`, flexShrink:0 }}>
-          <div style={{ display:"flex", alignItems:"flex-start", gap:10, marginBottom:12 }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:17, fontWeight:700, color:"#2c2c2a", letterSpacing:"-0.02em", lineHeight:1.3 }}>
+        <div style={{ padding:"18px 20px 14px", borderBottom:"1px solid #f0f0ee", flexShrink:0 }}>
+          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10, marginBottom:10 }}>
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontSize:16, fontWeight:700, color:"#37352f", letterSpacing:"-0.02em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                 {task.group}
               </div>
-              <div style={{ fontSize:12, color:"#73726c", marginTop:3 }}>
-                Groupe {task.groupe || "1"}
-              </div>
+              <div style={{ fontSize:11, color:"#9b9a97", marginTop:2 }}>Groupe {task.groupe || "1"}</div>
             </div>
-            <button onClick={onClose} style={{ width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",border:`1px solid rgba(55,53,47,0.18)`,borderRadius:5,background:"#fff",cursor:"pointer",color:"#73726c",flexShrink:0 }}>
-              <X style={{ width:13,height:13 }}/>
+            <button onClick={onClose} style={{ width:24, height:24, borderRadius:4, border:"1px solid #e3e3e2", background:"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", color:"#9b9a97", flexShrink:0 }}>
+              <X size={12}/>
             </button>
           </div>
-
-          {/* Badges */}
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:pal.bg, color:pal.text, border:`1px solid ${pal.bd||"transparent"}`, fontWeight:500 }}>
+            <span style={{ fontSize:11, padding:"2px 8px", borderRadius:4, background:pal.bg, color:pal.text, border:`1px solid ${pal.bd||"transparent"}`, fontWeight:500 }}>
               {task.group}
             </span>
             {hasConf && (
-              <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:"rgba(212,76,71,0.08)", color:"#d44c47", border:"1px solid rgba(212,76,71,0.25)", fontWeight:500 }}>
+              <span style={{ fontSize:11, padding:"2px 8px", borderRadius:4, background:"#fcebeb", color:"#a32d2d", border:"1px solid #f7c1c1", fontWeight:500 }}>
                 ⚠ Conflit
               </span>
             )}
-            {task.halfDay && (
-              <span style={{ fontSize:11, padding:"2px 8px", borderRadius:99, background:"rgba(203,145,47,0.1)", color:"#cb912f", border:"1px solid rgba(203,145,47,0.3)", fontWeight:500 }}>
-                {task.slot === "après-midi" ? "Après-midi" : "Matin"}
-              </span>
+          </div>
+        </div>
+
+        {/* ── KPIs — Période (bleu clair) + Durée (bleu) ── */}
+        <div style={{ padding:"12px 20px", borderBottom:"1px solid #f0f0ee", display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, flexShrink:0, background:"#fafaf9" }}>
+          {/* Période — bleu ciel */}
+          <div style={{ background:"#e8f4fd", border:"1px solid #90caf9", borderRadius:8, padding:"10px 12px" }}>
+            <div style={{ fontSize:10, fontWeight:600, color:"#1565c0", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>Période</div>
+            <div style={{ fontSize:12, fontWeight:700, color:"#0d3e7a", fontFamily:"monospace" }}>{fmt(task.start)} → {fmt(task.end)}</div>
+          </div>
+          {/* Durée — bleu royal */}
+          <div style={{ background:"#e6f1fb", border:"1px solid #b5d4f4", borderRadius:8, padding:"10px 12px" }}>
+            <div style={{ fontSize:10, fontWeight:600, color:"#185fa5", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>Durée</div>
+            <div style={{ fontSize:14, fontWeight:800, color:"#0c447c", display:"flex", alignItems:"center", gap:5 }}>
+              <CalendarDays size={13} color="#185fa5"/>
+              {task.halfDay ? "0.5 jour (½)" : `${meta.wdays} jour${meta.wdays > 1 ? "s" : ""}`}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Logistique & Coût ── */}
+        <div style={{ padding:"14px 20px", borderBottom:"1px solid #f0f0ee", flexShrink:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <span style={{ fontSize:10, fontWeight:600, color:"#9b9a97", textTransform:"uppercase", letterSpacing:"0.06em" }}>
+              Détails logistiques & coût
+            </span>
+            {!isEditingInfo ? (
+              <button onClick={()=>setIsEditingInfo(true)} style={{ width:22, height:22, borderRadius:4, border:"1px solid #e3e3e2", background:"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", color:"#9b9a97" }}>
+                <Edit2 size={11}/>
+              </button>
+            ) : (
+              <div style={{ display:"flex", gap:5 }}>
+                <button onClick={handleSaveInfo} disabled={isSaving} style={{ height:22, padding:"0 8px", background:"#0f7ddb", border:"none", borderRadius:4, color:"#fff", cursor:"pointer", display:"flex", alignItems:"center", gap:4, fontSize:11, fontWeight:500 }}>
+                  {isSaving ? <Loader2 size={11} className="spin"/> : <Check size={11}/>}
+                  {!isSaving && "Sauver"}
+                </button>
+                <button onClick={()=>setIsEditingInfo(false)} style={{ height:22, padding:"0 8px", background:"#f0f0ee", border:"none", borderRadius:4, cursor:"pointer", fontSize:11, color:"#6b6b6b" }}>
+                  Annuler
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+
+            {/* ── Cabinet — violet ── */}
+            <div style={cardRow(COLORS.cabinet)}>
+              <div style={iconBox(COLORS.cabinet)}>
+                <Building2 size={13} color={COLORS.cabinet.icon}/>
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                {!isEditingInfo ? (
+                  <>
+                    <div style={{ fontSize:10, color: COLORS.cabinet.label, fontWeight:600, marginBottom:2 }}>Cabinet</div>
+                    <div style={{ fontSize:12, fontWeight:600, color: cabinet ? COLORS.cabinet.text : "#b7b6b2" }}>{cabinet || "Non défini"}</div>
+                  </>
+                ) : (
+                  <input value={cabinet} onChange={e=>setCabinet(e.target.value)} placeholder="Cabinet…" style={inputStyle}/>
+                )}
+              </div>
+            </div>
+
+            {/* ── Lieu — orange ── */}
+            <div style={cardRow(COLORS.lieu)}>
+              <div style={iconBox(COLORS.lieu)}>
+                <MapPin size={13} color={COLORS.lieu.icon}/>
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                {!isEditingInfo ? (
+                  <>
+                    <div style={{ fontSize:10, color: COLORS.lieu.label, fontWeight:600, marginBottom:2 }}>Lieu</div>
+                    <div style={{ fontSize:12, fontWeight:600, color: lieu ? COLORS.lieu.text : "#b7b6b2", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{lieu || "Non défini"}</div>
+                  </>
+                ) : (
+                  <input value={lieu} onChange={e=>setLieu(e.target.value)} placeholder="Lieu…" style={inputStyle}/>
+                )}
+              </div>
+            </div>
+
+            {/* ── Coût — vert ── */}
+            <div style={cardRow(COLORS.cout)}>
+              <div style={iconBox(COLORS.cout)}>
+                <Banknote size={13} color={COLORS.cout.icon}/>
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                {!isEditingInfo ? (
+                  <>
+                    <div style={{ fontSize:10, color: COLORS.cout.label, fontWeight:600, marginBottom:2 }}>Coût HT/Jour</div>
+                    <div style={{ fontSize:14, fontWeight:800, color: COLORS.cout.text, display:"flex", alignItems:"baseline", gap:4 }}>
+                      {cout ? formatCoutFR(cout) : "—"}
+                      {cout && <span style={{ fontSize:10, fontWeight:500, color:"#1d9e75" }}>MAD</span>}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ position:"relative" }}>
+                    <input type="text" value={cout} onChange={e=>setCout(e.target.value)} placeholder="16.000,00" style={{ ...inputStyle, paddingRight:38 }}/>
+                    <span style={{ position:"absolute", right:9, top:"50%", transform:"translateY(-50%)", fontSize:10, color:"#9b9a97", fontWeight:600, pointerEvents:"none" }}>MAD</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* ── Participants ── */}
+        <div style={{ flex:1, padding:"14px 20px", display:"flex", flexDirection:"column", gap:10, minHeight:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
+            <div style={{ fontSize:10, fontWeight:600, color:"#9b9a97", textTransform:"uppercase", letterSpacing:"0.06em" }}>Participants</div>
+            <span style={{ fontSize:11, color:"#6b6b6b", background:"#f0f0ee", padding:"2px 8px", borderRadius:4, fontWeight:500 }}>
+              {groupCandidats.length} inscrit{groupCandidats.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+
+          <div style={{ flex:1, minHeight:0, border:"1px solid #e3e3e2", borderRadius:6, overflowY:"auto" }}>
+            {groupCandidats.length === 0 ? (
+              <div style={{ textAlign:"center", padding:"32px 20px", color:"#9b9a97", fontSize:12 }}>
+                Aucun candidat dans ce groupe
+              </div>
+            ) : (
+              groupCandidats.map((c, i) => {
+                const st = C_STATUS_MAP[c.statut] || { bg:"#f0f0ee", text:"#6b6b6b", bd:"#e3e3e2" };
+                return (
+                  <div key={c.id || i} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", background: i%2===0 ? "#fff" : "#fafaf9", borderBottom: i < groupCandidats.length - 1 ? "1px solid #f0f0ee" : "none" }}>
+                    <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(55,53,47,0.08)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#37352f", flexShrink:0 }}>
+                      {(c.nom || "?").charAt(0)}{(c.prenom || "").charAt(0)}
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:13, fontWeight:500, color:"#37352f", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.nom} {c.prenom}</div>
+                    </div>
+                    <span style={{ fontSize:10, padding:"2px 7px", borderRadius:4, background:st.bg, color:st.text, border:`1px solid ${st.bd}`, fontWeight:500, flexShrink:0 }}>
+                      {c.statut}
+                    </span>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
 
-        {/* ── Infos tâche ── */}
-        <div style={{ padding:"16px 22px", borderBottom:`1px solid rgba(55,53,47,0.08)`, display:"flex", flexDirection:"column", gap:10, flexShrink:0 }}>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-            {[
-              { label:"Début",      value: task.start ? fmt(task.start) : "—", mono:true },
-              { label:"Fin",        value: task.end   ? fmt(task.end)   : "—", mono:true },
-              { label:"Jours ouvrés", value: task.halfDay ? "½ journée" : (meta.wdays || "—"), mono:true },
-              { label:"Candidats",  value: candidatCountByKey[cfKey] || 0 },
-            ].map(f => (
-              <div key={f.label} style={{ background:"rgba(55,53,47,0.03)", borderRadius:8, padding:"10px 12px" }}>
-                <div style={{ fontSize:10, color:"#9c9a92", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>{f.label}</div>
-                <div style={{ fontSize:15, fontWeight:600, color:"#2c2c2a", fontFamily: f.mono?"monospace":"inherit" }}>{String(f.value)}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Barre avancement */}
-          {!task.halfDay && meta.prog.pct > 0 && (
-            <div>
-              <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#73726c", marginBottom:4 }}>
-                <span>Avancement</span>
-                <span style={{ fontWeight:600, color:"#2c2c2a" }}>{meta.prog.pct}%</span>
-              </div>
-              <div style={{ height:5, borderRadius:99, background:"rgba(55,53,47,0.1)", overflow:"hidden" }}>
-                <div style={{ height:"100%", width:`${meta.prog.pct}%`, background: meta.prog.pct===100?"#448361":"#cb912f", borderRadius:99, transition:"width 0.3s" }}/>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── Liste candidats ── */}
-        <div style={{ flex:1, padding:"16px 22px", display:"flex", flexDirection:"column", gap:10, minHeight:0 }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-            <div style={{ fontSize:11, fontWeight:700, color:"#73726c", textTransform:"uppercase", letterSpacing:"0.06em" }}>
-              Candidats
-            </div>
-            <span style={{ fontSize:11, color:"#9c9a92" }}>
-              {groupCandidats.length} inscrit{groupCandidats.length!==1?"s":""}
-            </span>
-          </div>
-
-          {groupCandidats.length === 0 ? (
-            <div style={{ textAlign:"center", padding:"24px 0", color:"#9c9a92", fontSize:12, fontStyle:"italic" }}>
-              Aucun candidat dans ce groupe
-            </div>
-          ) : (
-            <div style={{ 
-      overflowY:"auto",       // ← scroll ici
-      flex:1,
-      minHeight:0,            // ← indispensable pour que flex+overflow fonctionne
-      border:`1px solid rgba(55,53,47,0.1)`, 
-      borderRadius:8, 
-      overflow:"hidden auto", // ← horizontal caché, vertical auto
-      marginBottom:0,
-    }}>
-              {groupCandidats.map((c, i) => {
-                const st = C_STATUS_MAP[c.statut] || { bg:"#f1efe8", text:"#73726c", bd:"rgba(55,53,47,0.2)" };
-                const initials = `${(c.nom||"?").charAt(0)}${(c.prenom||"").charAt(0)}`.toUpperCase();
-                return (
-                  <div key={c.id||i} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", background: i%2===0?"#fff":"rgba(55,53,47,0.015)", borderBottom: i<groupCandidats.length-1?`1px solid rgba(55,53,47,0.07)`:"none" }}>
-                    {/* Avatar */}
-                    <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(55,53,47,0.08)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#73726c", flexShrink:0 }}>
-                      {initials}
-                    </div>
-                    {/* Nom */}
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:13, fontWeight:500, color:"#2c2c2a", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                        {c.nom} {c.prenom}
-                      </div>
-                      {c.departement && (
-                        <div style={{ fontSize:11, color:"#9c9a92", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                          {c.departement}
-                        </div>
-                      )}
-                    </div>
-                    {/* Statut */}
-                    {c.statut && (
-                      <span style={{ fontSize:10, padding:"2px 7px", borderRadius:99, background:st.bg, color:st.text, border:`1px solid ${st.bd}`, fontWeight:500, flexShrink:0 }}>
-                        {c.statut}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
         {/* ── Footer ── */}
-        <div style={{ padding:"12px 22px", borderTop:`1px solid rgba(55,53,47,0.1)`, flexShrink:0, display: "flex", gap: 10 }}>
-          <button
-            onClick={() => onPrint(task)}
-            style={{ 
-              flex: 1, 
-              padding:"8px 0", 
-              fontSize:13, 
-              fontWeight:500, 
-              color:"#37352f", 
-              background:"#fff", 
-              border:"1px solid rgba(55,53,47,0.2)", 
-              borderRadius:8, 
-              cursor:"pointer", 
-              fontFamily:"inherit", 
-              display:"flex", 
-              alignItems:"center", 
-              justifyContent:"center", 
-              gap:6 
-            }}
-          >
-            <Printer style={{ width:13,height:13 }}/> Émargement
+        <div style={{ padding:"12px 20px", borderTop:"1px solid #f0f0ee", flexShrink:0, display:"flex", gap:8 }}>
+          <button onClick={()=>onPrint(task)} style={{ flex:1, padding:"9px 0", fontSize:13, fontWeight:500, color:"#37352f", background:"#fff", border:"1px solid #e3e3e2", borderRadius:6, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
+            onMouseEnter={e=>e.currentTarget.style.background="#f7f7f5"}
+            onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+            <Printer size={13}/> Émargement
           </button>
-
-          <button
-            onClick={() => {
-    onEdit && onEdit(task);   // ← déclenche le switch + startEdit
-    onClose();                // ← ferme le drawer
-  }}
-            style={{ width:"50%", padding:"8px 0", fontSize:13, fontWeight:500, color:"#fff", background:"#2c2c2a", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
-          >
-            <Edit2 style={{ width:13,height:13 }}/> Modifier la tâche
+          <button onClick={()=>{ onEdit(task); onClose(); }} style={{ flex:1, padding:"9px 0", fontSize:13, fontWeight:500, color:"#fff", background:"#37352f", border:"none", borderRadius:6, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
+            onMouseEnter={e=>e.currentTarget.style.background="#111"}
+            onMouseLeave={e=>e.currentTarget.style.background="#37352f"}>
+            <Edit2 size={13}/> Paramètres Gantt
           </button>
         </div>
+
       </div>
     </>
   );
 }
+
 
 // ═══════════════════════════════════════════════════════════════
 // GANTT VIEW
@@ -3452,7 +3545,8 @@ const [pendingUpdate, setPendingUpdate] = useState(null);
 
   // ── Mode d'affichage
   const [viewMode, setViewMode] = useState("gantt"); // "gantt" | "calendar"
-
+ const [selectedTaskForDrawer, setSelectedTaskForDrawer] = useState(null);
+ const [printDoc, setPrintDoc] = useState(null);
   // Ajouter ce hook en haut du composant GanttView
 const [windowW, setWindowW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
 useEffect(() => {
@@ -4088,7 +4182,7 @@ const confirmUpdate = useCallback(async () => {
                     {visible.map(t=>{
                       if(editId===t.id||editId===t._id)return <EditRow key={t.id} isNew={false}/>;
                       const cfKey=`${t.group}||${t.groupe||""}`,isLiveConflict=liveConflictTaskKeys.has(cfKey),conflictTypes=conflictTypesMap[cfKey]||null,meta=metaCache[t.id]||{wdays:1,prog:{pct:0}},candidatCount=candidatCountByKey[cfKey]||0;
-                      return(<GRow key={t.id} task={t} SC={SC} cs={cs} zoom={zoom} projStart={projStart} totalDays={totalDays} todayOff={todayOff} wd={wd} sh={sh} vacs={vacs} onEdit={()=>startEdit(t)} onDelete={()=>delTask(t.id||t._id)} onUpdate={updTask} onUpdateSlot={updTaskSlot} registerScrollable={registerScrollable} unregisterScrollable={unregisterScrollable} slotMap={slotMap} isLiveConflict={isLiveConflict} conflictTypes={conflictTypes} wdays={meta.wdays} prog={meta.prog} candidatCount={candidatCount}/>);
+                      return(<GRow key={t.id} task={t} SC={SC} cs={cs} zoom={zoom} projStart={projStart} totalDays={totalDays} todayOff={todayOff} wd={wd} sh={sh} vacs={vacs} onEdit={()=>startEdit(t)} onDelete={()=>delTask(t.id||t._id)} onUpdate={updTask} onUpdateSlot={updTaskSlot} registerScrollable={registerScrollable} unregisterScrollable={unregisterScrollable} slotMap={slotMap} isLiveConflict={isLiveConflict} conflictTypes={conflictTypes} wdays={meta.wdays} prog={meta.prog} candidatCount={candidatCount}  onOpenDrawer={() => setSelectedTaskForDrawer(t)}/>);
                     })}
                   </div>
                 </div>
@@ -4145,6 +4239,38 @@ const confirmUpdate = useCallback(async () => {
     onCancel={() => setPendingUpdate(null)}
   />
 )}
+
+ {selectedTaskForDrawer && (
+        <TaskDrawer
+          task={selectedTaskForDrawer}
+          candidats={candidats}
+          metaCache={metaCache}
+          candidatCountByKey={candidatCountByKey}
+          conflictTypesMap={conflictTypesMap}
+          onClose={() => setSelectedTaskForDrawer(null)}
+          onEdit={(t) => { startEdit(t); setSelectedTaskForDrawer(null); }}
+          wsId={wsId}
+          showToast={showToast}
+          setCandidats={setCandidats}
+          onPrint={(t) => {
+            setPrintDoc({
+              nom: `Liste d'émargement - ${t.group} - G${t.groupe}`,
+              type: "Émargement"
+            });
+          }}
+        />
+      )}
+
+      {/* Designer d'émargement si lancé depuis le drawer */}
+      {printDoc && (
+        <AttendanceDesigner
+          doc={printDoc}
+          candidats={candidats}
+          tasks={displayTasksFiltered}
+          onClose={() => setPrintDoc(null)}
+          ws={ws}
+        />
+      )}
     </div>
   );
 }
@@ -10674,12 +10800,100 @@ function DocsView({currentUser, documents, setDocuments, wsId, showToast, candid
   );
 }
 
+// --- COMPOSANT SÉLECTEUR DE WORKSPACES (Dropdown Multi-choix) ---
+function WorkspaceSelector({ allWorkspaces, selectedIds, onChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setIsOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const isAllSelected = allWorkspaces.length > 0 && selectedIds.length === allWorkspaces.length;
+
+  const toggleAll = () => {
+    if (isAllSelected) onChange([]);
+    else onChange(allWorkspaces.map(ws => ws.id || ws._id));
+  };
+
+  const toggleOne = (id) => {
+    const next = selectedIds.includes(id) 
+      ? selectedIds.filter(x => x !== id) 
+      : [...selectedIds, id];
+    onChange(next);
+  };
+
+  const getLabel = () => {
+    if (selectedIds.length === 0) return "Sélectionner les espaces...";
+    if (isAllSelected) return "Tous les workspaces";
+    return `${selectedIds.length} espace(s) sélectionné(s)`;
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          width: "100%", padding: "10px 12px", borderRadius: 6, border: "1px solid #e3e3e2",
+          background: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center",
+          cursor: "pointer", fontSize: 13, color: selectedIds.length > 0 ? "#37352f" : "#9b9a97",
+          outline: "none", transition: "border-color 0.2s"
+        }}
+        onFocus={(e) => e.target.style.borderColor = "#0f7ddb"}
+        onBlur={(e) => e.target.style.borderColor = "#e3e3e2"}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getLabel()}</span>
+        <ChevronDown size={14} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "0.2s", flexShrink: 0, color: "#9b9a97" }} />
+      </button>
+
+      {isOpen && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100,
+          marginTop: 4, background: "#fff", border: "1px solid #e3e3e2", borderRadius: 8,
+          boxShadow: "0 10px 25px rgba(0,0,0,0.1)", maxHeight: 220, overflowY: "auto", padding: "4px"
+        }}>
+          {/* Option TOUS */}
+          <div onClick={toggleAll} style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", borderRadius: 6, transition: "0.1s" }} onMouseEnter={e => e.currentTarget.style.background = "#f7f7f5"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+            <div style={{ width: 16, height: 16, border: "1.5px solid #0f7ddb", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", background: isAllSelected ? "#0f7ddb" : "transparent" }}>
+              {isAllSelected && <Check size={12} color="#fff" strokeWidth={3} />}
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: isAllSelected ? "#0f7ddb" : "#37352f" }}>Tous les workspaces</span>
+          </div>
+
+          <div style={{ height: 1, background: "#f0f0ee", margin: "4px 0" }} />
+
+          {/* Liste des WS individuels */}
+          {allWorkspaces.map(ws => {
+            const id = ws.id || ws._id;
+            const isSelected = selectedIds.includes(id);
+            return (
+              <div key={id} onClick={() => toggleOne(id)} style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", borderRadius: 6, transition: "0.1s" }} onMouseEnter={e => e.currentTarget.style.background = "#f7f7f5"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div style={{ width: 16, height: 16, border: `1.5px solid ${isSelected ? "#0f7ddb" : "#d3d3d1"}`, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", background: isSelected ? "#0f7ddb" : "transparent" }}>
+                  {isSelected && <Check size={12} color="#fff" strokeWidth={3} />}
+                </div>
+                <span style={{ fontSize: 13, color: "#37352f" }}>{ws.company || ws.name}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- COMPOSANT PRINCIPAL PROFILE VIEW ---
 function ProfileView({ currentUser, onSave, showToast }) {
   const [displayName, setDisplayName] = useState(currentUser?.displayName || currentUser?.username || "");
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
-
+  
   const [team, setTeam] = useState([]);
+  const [allWorkspaces, setAllWorkspaces] = useState([]);
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [showTeamForm, setShowTeamForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -10687,14 +10901,18 @@ function ProfileView({ currentUser, onSave, showToast }) {
   const [nuUsername, setNuUsername] = useState("");
   const [nuPassword, setNuPassword] = useState("");
   const [nuDisplayName, setNuDisplayName] = useState("");
-  const [nuPerms, setNuPerms] = useState({ canImportExcel: true, canViewDocs: true });
+  const [nuPerms, setNuPerms] = useState({ canImportExcel: true, canViewDocs: true, allowedDocTypes: [] });
+  const [nuAllowedWorkspaces, setNuAllowedWorkspaces] = useState([]);
   const [focusedField, setFocusedField] = useState(null);
 
   useEffect(() => {
     if (currentUser && !currentUser.parentId && currentUser.role !== "admin") {
       setLoadingTeam(true);
-      apiFetch("/auth/subusers")
-        .then(res => setTeam(res))
+      Promise.all([apiFetch("/auth/subusers"), apiFetch("/workspaces")])
+        .then(([teamRes, wsRes]) => {
+          setTeam(teamRes);
+          setAllWorkspaces(wsRes.data || []);
+        })
         .catch(e => console.error(e))
         .finally(() => setLoadingTeam(false));
     }
@@ -10706,369 +10924,182 @@ function ProfileView({ currentUser, onSave, showToast }) {
       setNuDisplayName(u.displayName || "");
       setNuUsername(u.username || "");
       setNuPassword("");
-      setNuPerms(u.permissions || { canImportExcel: true, canViewDocs: true });
+      setNuPerms(u.permissions || { canImportExcel: true, canViewDocs: true, allowedDocTypes: [] });
+      setNuAllowedWorkspaces(u.allowedWorkspaces || []);
     } else {
       setNuDisplayName(""); setNuUsername(""); setNuPassword("");
-      setNuPerms({ canImportExcel: true, canViewDocs: true });
+      setNuPerms({ canImportExcel: true, canViewDocs: true, allowedDocTypes: [] });
+      setNuAllowedWorkspaces([]);
     }
     setShowTeamForm(true);
   };
 
   const saveTeamMember = async () => {
     if (!nuUsername || (!nuPassword && !editingUser)) return showToast("Identifiant et mot de passe requis", "error");
+    const body = { 
+      username: nuUsername, displayName: nuDisplayName, 
+      permissions: nuPerms, allowedWorkspaces: nuAllowedWorkspaces 
+    };
+    if (nuPassword) body.password = nuPassword;
     try {
       if (editingUser) {
-        const body = { displayName: nuDisplayName, permissions: nuPerms };
-        if (nuPassword) body.password = nuPassword;
         const res = await apiFetch(`/auth/subusers/${editingUser._id}`, { method: "PUT", body });
         setTeam(team.map(t => t._id === res.user._id ? res.user : t));
-        showToast("Utilisateur mis à jour", "success");
+        showToast("Mis à jour", "success");
       } else {
-        const body = { username: nuUsername, password: nuPassword, displayName: nuDisplayName, permissions: nuPerms };
         const res = await apiFetch("/auth/subusers", { method: "POST", body });
         setTeam([...team, res.user]);
-        showToast("Utilisateur créé", "success");
+        showToast("Créé", "success");
       }
       setShowTeamForm(false);
     } catch (e) { showToast(e.message, "error"); }
   };
 
   const deleteTeamMember = async (id) => {
-    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cet accès ?")) return;
+    if (!window.confirm("Supprimer cet accès ?")) return;
     try {
       await apiFetch(`/auth/subusers/${id}`, { method: "DELETE" });
       setTeam(team.filter(t => t._id !== id));
-      showToast("Accès supprimé", "success");
+      showToast("Supprimé", "success");
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  const save = async () => {
+  const saveProfile = async () => {
     setSaving(true);
     try {
       await onSave(displayName.trim(), password);
-      showToast("Profil mis à jour avec succès", "success");
+      showToast("Profil à jour", "success");
       setPassword("");
-    } catch (e) {
-      showToast(e.message, "error");
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { showToast(e.message, "error"); }
+    finally { setSaving(false); }
   };
 
-  // ── Styles partagés ──
+  // Styles
   const inputStyle = (field, disabled = false) => ({
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "8px 11px",
+    width: "100%", boxSizing: "border-box", padding: "8px 11px",
     border: `1px solid ${disabled ? "#f0f0ee" : focusedField === field ? "#0f7ddb" : "#e3e3e2"}`,
-    borderRadius: 6,
-    fontSize: 13,
-    color: disabled ? "#b7b6b2" : "#37352f",
-    background: disabled ? "#fafaf9" : "#fff",
-    outline: "none",
-    fontFamily: "inherit",
-    cursor: disabled ? "not-allowed" : "text",
-    boxShadow: focusedField === field ? "0 0 0 2px rgba(15,125,219,0.14)" : "none",
-    transition: "border-color 0.15s, box-shadow 0.15s",
+    borderRadius: 6, fontSize: 13, background: disabled ? "#fafaf9" : "#fff", outline: "none",
+    boxShadow: focusedField === field ? "0 0 0 2px rgba(15,125,219,0.14)" : "none", transition: "0.15s"
   });
-
-  const labelStyle = {
-    display: "block",
-    fontSize: 11,
-    fontWeight: 500,
-    color: "#6b6b6b",
-    marginBottom: 5,
-  };
-
-  const cardStyle = {
-    background: "#fff",
-    borderRadius: 8,
-    border: "1px solid #e3e3e2",
-    padding: "20px 24px",
-    marginBottom: 12,
-  };
-
-  const cardTitleStyle = {
-    fontSize: 12,
-    fontWeight: 600,
-    color: "#37352f",
-    marginBottom: 16,
-    paddingBottom: 10,
-    borderBottom: "1px solid #f0f0ee",
-  };
-
+  const labelStyle = { display: "block", fontSize: 11, fontWeight: 500, color: "#6b6b6b", marginBottom: 5 };
+  const cardStyle = { background: "#fff", borderRadius: 8, border: "1px solid #e3e3e2", padding: "20px 24px", marginBottom: 12 };
+  const cardTitleStyle = { fontSize: 12, fontWeight: 600, color: "#37352f", marginBottom: 16, paddingBottom: 10, borderBottom: "1px solid #f0f0ee" };
   const btnBase = { border: "none", background: "none", cursor: "pointer", fontFamily: "inherit" };
-
-  const initials = currentUser
-    ? (currentUser.displayName || currentUser.username || "?").slice(0, 2).toUpperCase()
-    : "?";
 
   return (
     <div style={{ padding: "32px 40px", maxWidth: 660, margin: "0 auto" }}>
-      {/* ── En-tête page ── */}
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#37352f", margin: "0 0 4px", letterSpacing: "-0.02em" }}>
-          Mon profil
-        </h1>
-        <p style={{ fontSize: 13, color: "#9b9a97", margin: 0 }}>
-          Gérez vos informations personnelles et paramètres de sécurité.
-        </p>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#37352f", margin: "0 0 4px" }}>Mon profil</h1>
+        <p style={{ fontSize: 13, color: "#9b9a97", margin: 0 }}>Gérez vos informations et votre équipe.</p>
       </div>
 
-      {/* ── Informations personnelles ── */}
+      {/* PROFIL PERSO */}
       <div style={cardStyle}>
         <div style={cardTitleStyle}>Informations personnelles</div>
-
-        {/* Avatar */}
-        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-          <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(55,53,47,0.08)", border: "1px solid rgba(55,53,47,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 600, color: "#37352f", flexShrink: 0 }}>
-            {initials}
-          </div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 500, color: "#37352f", marginBottom: 2 }}>
-              {currentUser?.displayName || currentUser?.username}
-            </div>
-            <div style={{ fontSize: 12, color: "#9b9a97" }}>
-              Avatar généré automatiquement depuis votre nom d'affichage
-            </div>
-          </div>
-        </div>
-
-        {/* Identifiant + Rôle */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-          <div>
-            <label style={labelStyle}>Identifiant</label>
-            <input type="text" value={currentUser?.username || ""} disabled style={inputStyle("__disabled_1", true)} />
-          </div>
-          <div>
-            <label style={labelStyle}>Rôle</label>
-            <input type="text" value={currentUser?.role === "admin" ? "Administrateur" : "Utilisateur"} disabled style={inputStyle("__disabled_2", true)} />
-          </div>
+          <div><label style={labelStyle}>Identifiant</label><input value={currentUser?.username} disabled style={inputStyle("", true)} /></div>
+          <div><label style={labelStyle}>Rôle</label><input value={currentUser?.role === "admin" ? "Admin" : "Utilisateur"} disabled style={inputStyle("", true)} /></div>
         </div>
-
-        {/* Nom d'affichage */}
         <div>
           <label style={labelStyle}>Nom d'affichage</label>
-          <input
-            type="text"
-            value={displayName}
-            onChange={e => setDisplayName(e.target.value)}
-            placeholder="Votre nom complet…"
-            style={inputStyle("displayName")}
-            onFocus={() => setFocusedField("displayName")}
-            onBlur={() => setFocusedField(null)}
-          />
-          <p style={{ fontSize: 11, color: "#b7b6b2", margin: "5px 0 0" }}>
-            Ce nom apparaîtra dans l'interface et la barre latérale.
-          </p>
+          <input value={displayName} onChange={e => setDisplayName(e.target.value)} style={inputStyle("displayName")} onFocus={() => setFocusedField("displayName")} onBlur={() => setFocusedField(null)} />
         </div>
       </div>
 
-      {/* ── Sécurité ── */}
       <div style={cardStyle}>
         <div style={cardTitleStyle}>Sécurité</div>
-        <div>
-          <label style={labelStyle}>Nouveau mot de passe</label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="Laissez vide pour conserver l'actuel"
-            style={inputStyle("password")}
-            onFocus={() => setFocusedField("password")}
-            onBlur={() => setFocusedField(null)}
-          />
-          <p style={{ fontSize: 11, color: "#b7b6b2", margin: "5px 0 0" }}>
-            Entrez un nouveau mot de passe puis sauvegardez pour le modifier.
-          </p>
-        </div>
+        <label style={labelStyle}>Nouveau mot de passe</label>
+        <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Laisser vide pour ne pas changer" style={inputStyle("password")} onFocus={() => setFocusedField("password")} onBlur={() => setFocusedField(null)} />
       </div>
 
-      {/* ── Bouton sauvegarder ── */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-        <button
-  onClick={save}
-  disabled={saving}
-  style={{
-    ...btnBase,
-    padding: "7px 16px",
-    borderRadius: 6,
-    border: `1px solid ${saving ? "#d3d3d1" : "#000"}`,
-    background: saving ? "#e9e9e7" : "#000",
-    fontSize: 13,
-    fontWeight: 500,
-    color: saving ? "#9b9a97" : "#fff",
-    cursor: saving ? "not-allowed" : "pointer",
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    transition: "background 0.12s",
-  }}
-  onMouseEnter={e => {
-    if (!saving) e.currentTarget.style.background = "#333"; // hover gris foncé
-  }}
-  onMouseLeave={e => {
-    if (!saving) e.currentTarget.style.background = "#000";
-  }}
->
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v14a2 2 0 01-2 2z"/>
-            <polyline points="17 21 17 13 7 13 7 21"/>
-            <polyline points="7 3 7 8 15 8"/>
-          </svg>
-          {saving ? "Sauvegarde…" : "Enregistrer les modifications"}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 32 }}>
+        <button onClick={saveProfile} disabled={saving} style={{ ...btnBase, padding: "9px 20px", borderRadius: 6, background: "#000", color: "#fff", fontWeight: 600, fontSize: 13 }}>
+          {saving ? "Sauvegarde..." : "Enregistrer"}
         </button>
       </div>
 
-      {/* ── Gestion d'équipe ── */}
+      {/* GESTION ÉQUIPE */}
       {currentUser && !currentUser.parentId && currentUser.role !== "admin" && (
         <div style={cardStyle}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, paddingBottom: 10, borderBottom: "1px solid #f0f0ee" }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#37352f", marginBottom: 2 }}>Gestion d'équipe</div>
-              <div style={{ fontSize: 11, color: "#9b9a97" }}>Accès limités partageant vos espaces de travail</div>
-            </div>
-            <button
-              onClick={() => openTeamForm()}
-              style={{ ...btnBase, padding: "5px 12px", borderRadius: 6, border: "1px solid #e3e3e2", background: "#fff", fontSize: 12, fontWeight: 500, color: "#37352f", display: "flex", alignItems: "center", gap: 5, transition: "background 0.1s" }}
-              onMouseEnter={e => e.currentTarget.style.background = "#f7f7f5"}
-              onMouseLeave={e => e.currentTarget.style.background = "#fff"}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Créer un accès
-            </button>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <div><div style={{ fontSize: 13, fontWeight: 600 }}>Gestion d'équipe</div><div style={{ fontSize: 11, color: "#9b9a97" }}>Accès partagés</div></div>
+            <button onClick={() => openTeamForm()} style={{ ...btnBase, padding: "6px 12px", borderRadius: 6, border: "1px solid #e3e3e2", background: "#fff", fontSize: 12, fontWeight: 500, display: "flex", alignItems: "center", gap: 5 }}><Plus size={14} /> Créer</button>
           </div>
-
-          {loadingTeam ? (
-            <div style={{ fontSize: 13, color: "#9b9a97" }}>Chargement de l'équipe…</div>
-          ) : team.length === 0 ? (
-            <div style={{ padding: "20px", textAlign: "center", border: "1px dashed #e3e3e2", borderRadius: 6, fontSize: 13, color: "#9b9a97" }}>
-              Aucun sous-compte créé pour l'instant.
+          {team.length === 0 ? <div style={{ textAlign: "center", padding: "20px", color: "#999", fontSize: 12 }}>Aucun membre.</div> : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {team.map(t => (
+                <div key={t._id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderRadius: 8, border: "1px solid #f0f0ee", background: "#fafaf9" }}>
+                  <div><div style={{ fontSize: 13, fontWeight: 600 }}>{t.displayName || t.username}</div><div style={{ fontSize: 11, color: "#9b9a97" }}>{t.allowedWorkspaces?.length || 0} workspace(s)</div></div>
+                  <div style={{ display: "flex", gap: 8 }}><button onClick={() => openTeamForm(t)} style={{ ...btnBase, color: "#666" }}><Edit2 size={14} /></button><button onClick={() => deleteTeamMember(t._id)} style={{ ...btnBase, color: "#d44c47" }}><Trash2 size={14} /></button></div>
+                </div>
+              ))}
             </div>
-          ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid #f0f0ee" }}>
-                  <th style={{ textAlign: "left", padding: "7px 10px", fontSize: 11, fontWeight: 500, color: "#9b9a97" }}>Utilisateur</th>
-                  <th style={{ textAlign: "left", padding: "7px 10px", fontSize: 11, fontWeight: 500, color: "#9b9a97" }}>Permissions</th>
-                  <th style={{ padding: "7px 10px", width: 60 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {team.map((t, i) => (
-                  <tr key={t._id} style={{ borderBottom: i < team.length - 1 ? "1px solid #f7f7f5" : "none" }}>
-                    <td style={{ padding: "10px 10px" }}>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: "#37352f" }}>{t.displayName || "Sans nom"}</div>
-                      <div style={{ fontSize: 11, color: "#9b9a97" }}>@{t.username}</div>
-                    </td>
-                    <td style={{ padding: "10px 10px" }}>
-                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                        {t.permissions?.canImportExcel && (
-                          <span style={{ fontSize: 10, background: "#eaf3de", color: "#3b6d11", padding: "2px 7px", borderRadius: 4, fontWeight: 500 }}>Excel</span>
-                        )}
-                        {t.permissions?.allowedDocTypes?.map(type => (
-                          <span key={type} style={{ fontSize: 10, background: "#e6f1fb", color: "#185fa5", padding: "2px 7px", borderRadius: 4, fontWeight: 500 }}>{type}</span>
-                        ))}
-                        {(!t.permissions?.allowedDocTypes || t.permissions.allowedDocTypes.length === 0) && (
-                          <span style={{ fontSize: 11, color: "#d44c47" }}>Aucun document</span>
-                        )}
-                      </div>
-                    </td>
-                    <td style={{ padding: "10px 10px", textAlign: "right" }}>
-                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                        <button onClick={() => openTeamForm(t)} style={{ ...btnBase, color: "#9b9a97", padding: 3, borderRadius: 4, display: "flex" }}>
-                          <Edit2 style={{ width: 13, height: 13 }} />
-                        </button>
-                        <button onClick={() => deleteTeamMember(t._id)} style={{ ...btnBase, color: "#d44c47", padding: 3, borderRadius: 4, display: "flex" }}>
-                          <Trash2 style={{ width: 13, height: 13 }} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           )}
         </div>
       )}
 
-      {/* ── Modal sous-compte ── */}
+      {/* MODAL ÉQUIPE */}
       {showTeamForm && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #e3e3e2", width: "min(400px, 95vw)", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", overflow: "hidden" }}>
-
-            {/* Header modal */}
-            <div style={{ padding: "14px 18px", borderBottom: "1px solid #f0f0ee", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#37352f", letterSpacing: "-0.01em" }}>
-                {editingUser ? "Modifier l'accès" : "Nouvel accès"}
-              </span>
-              <button onClick={() => setShowTeamForm(false)} style={{ ...btnBase, width: 24, height: 24, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", color: "#9b9a97" }}>
-                <X style={{ width: 14, height: 14 }} />
-              </button>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: "#fff", borderRadius: 10, width: "100%", maxWidth: 450, boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #f0f0ee", display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontWeight: 700 }}>{editingUser ? "Modifier" : "Nouvel accès"}</span>
+              <button onClick={() => setShowTeamForm(false)} style={btnBase}><X size={18} /></button>
             </div>
+            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 15, maxHeight: "70vh", overflowY: "auto" }}>
+              <div><label style={labelStyle}>Nom complet</label><input value={nuDisplayName} onChange={e => setNuDisplayName(e.target.value)} style={inputStyle("nuDisplayName")} /></div>
+              <div><label style={labelStyle}>Identifiant (Login)</label><input value={nuUsername} onChange={e => setNuUsername(e.target.value)} disabled={!!editingUser} style={inputStyle("nuUsername", !!editingUser)} /></div>
+              <div><label style={labelStyle}>Mot de passe</label><input type="password" value={nuPassword} onChange={e => setNuPassword(e.target.value)} style={inputStyle("nuPassword")} /></div>
 
-            {/* Body modal */}
-            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 13 }}>
-              <div>
-                <label style={labelStyle}>Nom complet</label>
-                <input type="text" value={nuDisplayName} onChange={e => setNuDisplayName(e.target.value)} placeholder="Ex : Jean Martin" style={inputStyle("nuDisplayName")} onFocus={() => setFocusedField("nuDisplayName")} onBlur={() => setFocusedField(null)} />
-              </div>
-              <div>
-                <label style={labelStyle}>Identifiant de connexion</label>
-                <input type="text" value={nuUsername} onChange={e => setNuUsername(e.target.value)} disabled={!!editingUser} placeholder="Ex : jean_reception" style={inputStyle("nuUsername", !!editingUser)} onFocus={() => !editingUser && setFocusedField("nuUsername")} onBlur={() => setFocusedField(null)} />
-              </div>
-              <div>
-                <label style={labelStyle}>Mot de passe {editingUser && <span style={{ color: "#b7b6b2" }}>(optionnel)</span>}</label>
-                <input type="password" value={nuPassword} onChange={e => setNuPassword(e.target.value)} placeholder={editingUser ? "Laissez vide pour conserver" : "Mot de passe"} style={inputStyle("nuPassword")} onFocus={() => setFocusedField("nuPassword")} onBlur={() => setFocusedField(null)} />
-              </div>
+              {/* SECTION WORKSPACES */}
+              <div style={{ borderTop: "1px solid #f0f0ee", paddingTop: 15 }}>
+    <label style={{ ...labelStyle, color: "#37352f", fontWeight: 600 }}>Workspaces autorisés</label>
+    <WorkspaceSelector 
+      allWorkspaces={allWorkspaces} 
+      selectedIds={nuAllowedWorkspaces} 
+      onChange={setNuAllowedWorkspaces} 
+    />
+  </div>
 
-              {/* Permissions */}
-              <div style={{ borderTop: "1px solid #f0f0ee", paddingTop: 14 }}>
-                <label style={{ ...labelStyle, marginBottom: 10, fontSize: 12 }}>Permissions accordées</label>
-
-                <div
+              {/* SECTION PERMISSION EXCEL (L'OUBLI RÉPARÉ) */}
+              <div style={{ borderTop: "1px solid #f0f0ee", paddingTop: 15 }}>
+                <label style={{ ...labelStyle, color: "#000", fontWeight: 700 }}>Permissions Générales</label>
+                <div 
                   onClick={() => setNuPerms({ ...nuPerms, canImportExcel: !nuPerms.canImportExcel })}
-                  style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, cursor: "pointer", padding: "9px 11px", borderRadius: 6, border: "1px solid #f0f0ee", background: "#fafaf9" }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "10px", borderRadius: 6, border: "1px solid #f0f0ee", background: "#fafaf9" }}
                 >
-                  <input type="checkbox" checked={nuPerms.canImportExcel} readOnly style={{ width: 14, height: 14, accentColor: "#0f7ddb", cursor: "pointer" }} />
+                  <div style={{ width: 16, height: 16, border: "1.5px solid #0f7ddb", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", background: nuPerms.canImportExcel ? "#0f7ddb" : "transparent" }}>
+                    {nuPerms.canImportExcel && <Check size={12} color="#fff" strokeWidth={3} />}
+                  </div>
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: "#37352f" }}>Importer des données Excel</div>
-                    <div style={{ fontSize: 11, color: "#9b9a97" }}>Accès à l'assistant d'importation "3 bases"</div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>Exporter / Importer Excel</div>
+                    <div style={{ fontSize: 11, color: "#6b6b6b" }}>Autorise l'accès aux outils d'importation et export Excel</div>
                   </div>
                 </div>
+              </div>
 
-                <label style={{ ...labelStyle, marginBottom: 8 }}>Types de documents consultables</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, background: "#fafaf9", padding: "11px 12px", borderRadius: 6, border: "1px solid #f0f0ee" }}>
+              {/* SECTION DOCUMENTS */}
+              <div>
+                <label style={{ ...labelStyle, color: "#000", fontWeight: 700 }}>Documents autorisés</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   {DOC_TYPES.map(type => {
-                    const allowedList = nuPerms.allowedDocTypes || [];
-                    const isAllowed = allowedList.includes(type);
+                    const isAllowed = nuPerms.allowedDocTypes.includes(type);
                     return (
-                      <label key={type} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={isAllowed}
-                          onChange={() => {
-                            const nextList = isAllowed ? allowedList.filter(t => t !== type) : [...allowedList, type];
-                            setNuPerms({ ...nuPerms, allowedDocTypes: nextList });
-                          }}
-                          style={{ width: 13, height: 13, accentColor: "#0f7ddb" }}
-                        />
-                        <span style={{ fontSize: 12, color: "#37352f" }}>{type}</span>
+                      <label key={type} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px" }}>
+                        <input type="checkbox" checked={isAllowed} onChange={() => {
+                          const next = isAllowed ? nuPerms.allowedDocTypes.filter(t => t !== type) : [...nuPerms.allowedDocTypes, type];
+                          setNuPerms({ ...nuPerms, allowedDocTypes: next });
+                        }} />
+                        <span style={{ fontSize: 12 }}>{type}</span>
                       </label>
                     );
                   })}
                 </div>
               </div>
             </div>
-
-            {/* Footer modal */}
-            <div style={{ padding: "12px 18px", borderTop: "1px solid #f0f0ee", display: "flex", justifyContent: "flex-end", gap: 8, background: "#fafaf9" }}>
-              <button onClick={() => setShowTeamForm(false)} style={{ ...btnBase, padding: "7px 14px", borderRadius: 6, border: "1px solid #e3e3e2", background: "#fff", fontSize: 13, fontWeight: 500, color: "#37352f" }}>
-                Annuler
-              </button>
-              <button onClick={saveTeamMember} style={{ ...btnBase, padding: "7px 16px", borderRadius: 6, border: "1px solid #000000", background: "#000000", fontSize: 13, fontWeight: 500, color: "#fff", cursor: "pointer" }}>
-                Sauvegarder
-              </button>
+            <div style={{ padding: "16px 20px", background: "#fafaf9", display: "flex", justifyContent: "flex-end", gap: 10, borderBottomLeftRadius: 10, borderBottomRightRadius: 10 }}>
+              <button onClick={() => setShowTeamForm(false)} style={{ ...btnBase, padding: "8px 15px", borderRadius: 6, border: "1px solid #e3e3e2" }}>Annuler</button>
+              <button onClick={saveTeamMember} style={{ ...btnBase, padding: "8px 20px", borderRadius: 6, background: "#000", color: "#fff", fontWeight: 600 }}>Sauvegarder</button>
             </div>
           </div>
         </div>

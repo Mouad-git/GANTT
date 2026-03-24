@@ -20,6 +20,7 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:5173', 
+    'http://localhost:5174', 
     'https://gantt-pied.vercel.app', 
     'https://m2s-formaplan.vercel.app',
     'https://sparkling-empathy-production-05b3.up.railway.app'
@@ -70,6 +71,7 @@ const UserSchema = new mongoose.Schema({
   role: { type: String, default: "user" },
   displayName: { type: String, default: "" },
   parentId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  allowedWorkspaces: [{ type: mongoose.Schema.Types.ObjectId, ref: "Workspace" }], 
   permissions: {
     canImportExcel: { type: Boolean, default: true },
     canViewDocs: { type: Boolean, default: true },
@@ -493,7 +495,9 @@ app.get("/api/auth/subusers", authenticateToken, async (req, res) => {
 app.post("/api/auth/subusers", authenticateToken, async (req, res) => {
   if (req.user.parentId) return res.status(403).json({ error: "Accès refusé" });
   try {
-    const { username, password, displayName, permissions } = req.body;
+    // Ajoutez 'allowedWorkspaces' dans la déstructuration ici :
+    const { username, password, displayName, permissions, allowedWorkspaces } = req.body;
+    
     const existing = await User.findOne({ username });
     if (existing) return res.status(400).json({ error: "Nom d'utilisateur déjà pris" });
     
@@ -503,6 +507,7 @@ app.post("/api/auth/subusers", authenticateToken, async (req, res) => {
       password: hashedPassword, 
       displayName, 
       parentId: req.user.id,
+      allowedWorkspaces: allowedWorkspaces || [], // <--- SAUVEGARDE ICI
       permissions: permissions || { canImportExcel: true, canViewDocs: true }
     });
     const { password: _, ...userWithoutPass } = user.toObject();
@@ -512,13 +517,18 @@ app.post("/api/auth/subusers", authenticateToken, async (req, res) => {
 
 app.put("/api/auth/subusers/:id", authenticateToken, async (req, res) => {
   try {
-    const { displayName, password, permissions } = req.body;
+    // Ajoutez 'allowedWorkspaces' ici aussi :
+    const { displayName, password, permissions, allowedWorkspaces } = req.body;
+    
     const user = await User.findOne({ _id: req.params.id, parentId: req.user.id });
     if (!user) return res.status(404).json({ error: "Utilisateur non trouvé" });
     
     if (displayName) user.displayName = displayName.trim();
     if (password) user.password = await bcrypt.hash(password, 10);
     if (permissions) user.permissions = { ...user.permissions, ...permissions };
+    
+    // AJOUTEZ CETTE LIGNE :
+    if (allowedWorkspaces) user.allowedWorkspaces = allowedWorkspaces;
     
     await user.save();
     const { password: _, ...userWithoutPass } = user.toObject();
@@ -582,11 +592,18 @@ app.param('wsId', async (req, res, next, wsId) => {
 app.get("/api/workspaces", async (req, res, next) => {
   try {
     const filter = {};
-    if (req.user && req.user.role !== "admin") {
-      filter.owner = req.user.parentId || req.user.id;
+    
+    if (req.user.role === "admin") {
+       // Admin voit tout
+    } else if (req.user.parentId) {
+      // SI C'EST UN COLLABORATEUR : On filtre par ses IDs autorisés
+      const user = await User.findById(req.user.id);
+      filter._id = { $in: user.allowedWorkspaces };
+    } else {
+      // Si c'est un compte principal, il voit ses propres workspaces
+      filter.owner = req.user.id;
     }
-    if (req.query.archived === "true")  filter.archived = true;
-    if (req.query.archived === "false") filter.archived = false;
+
     const data = await Workspace.find(filter).sort({ createdAt: -1 });
     res.json({ success: true, data });
   } catch (e) { next(e); }
