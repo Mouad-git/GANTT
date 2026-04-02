@@ -21,6 +21,7 @@ app.use(cors({
   origin: [
     'http://localhost:5173', 
     'http://localhost:5174', 
+    'http://localhost:5175', 
     'https://gantt-pied.vercel.app', 
     'https://m2s-formaplan.vercel.app',
     'https://sparkling-empathy-production-05b3.up.railway.app'
@@ -116,9 +117,9 @@ const WorkspaceSchema = new mongoose.Schema({
   name:         { type: String, required: true, trim: true },
   owner:        { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   description:  { type: String, default: "" },
-  startDate:    { type: String, default: "" },
-  endDate:      { type: String, default: "" },
   annee:        { type: Number, default: () => new Date().getFullYear() },
+startDate:    { type: String, default: () => `${new Date().getFullYear()}-01-01` },
+endDate:      { type: String, default: () => `${new Date().getFullYear()}-12-31` },
   site:         { type: String, default: "" },
   budget:       { type: Number, default: 0 },
   couleur:      { type: String, default: "#0f7ddb" },
@@ -624,7 +625,17 @@ app.get("/api/workspaces/:id", async (req, res, next) => {
 app.post("/api/workspaces", async (req, res, next) => {
   try {
     const ownerId = req.user ? (req.user.parentId || req.user.id) : undefined;
-    const payload = { ...req.body, owner: ownerId };
+    
+    // Si annee fourni, calcul automatique des dates
+    let payload = { ...req.body, owner: ownerId };
+    // ✅ APRÈS — utilise les dates envoyées, ou calcule par défaut
+if (payload.annee && !payload.startDate) {
+  payload.startDate = `${payload.annee}-01-01`;
+}
+if (payload.annee && !payload.endDate) {
+  payload.endDate = `${payload.annee}-12-31`;
+}
+    
     const ws = await Workspace.create(payload);
     res.status(201).json({ success: true, data: ws });
   } catch (e) { next(e); }
@@ -632,18 +643,25 @@ app.post("/api/workspaces", async (req, res, next) => {
 
 app.put("/api/workspaces/:id", async (req, res, next) => {
   try {
-    const { company, logoUrl, name, startDate, endDate, workingDays, skipHolidays, vacances, ...rest } = req.body;
+    const { company, logoUrl, name, annee, startDate, endDate, workingDays, skipHolidays, vacances, ...rest } = req.body;
     const update = { ...rest };
-    if (company)              update.name         = company;
-    if (name)                 update.name         = name;
-    if (logoUrl !== undefined) update.logoUrl = logoUrl;  // ← ajout
-    if (startDate !== undefined) update.startDate = startDate;
-    if (endDate   !== undefined) update.endDate   = endDate;
+    if (company)              update.name      = company;
+    if (name)                 update.name      = name;
+    if (logoUrl !== undefined) update.logoUrl  = logoUrl;
+
+    // Si annee fourni, les dates sont calculées — pas de saisie libre
+    // ✅ APRÈS — accepte les dates précises si fournies
+if (annee !== undefined) {
+  update.annee = annee;
+}
+if (startDate !== undefined) update.startDate = startDate;
+if (endDate   !== undefined) update.endDate   = endDate;
+
     if (workingDays  !== undefined) update.workingDays  = workingDays;
     if (skipHolidays !== undefined) update.skipHolidays = skipHolidays;
     if (vacances     !== undefined) update.vacances     = vacances;
 
-    const ws = await Workspace.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
+    const ws = await Workspace.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after', runValidators: true });
     if (!ws) return res.status(404).json({ success: false, message: "Workspace introuvable" });
     const wsObj = ws.toObject();
     wsObj.company = wsObj.name;
@@ -662,7 +680,7 @@ app.patch("/api/workspaces/:id/settings", async (req, res, next) => {
     if (Object.keys(update).length === 0)
       return res.status(400).json({ success: false, message: "Aucun paramètre à mettre à jour" });
     const ws = await Workspace.findByIdAndUpdate(
-      req.params.id, { $set: update }, { new: true, runValidators: true }
+      req.params.id, { $set: update }, { returnDocument: 'after', runValidators: true }
     );
     if (!ws) return res.status(404).json({ success: false, message: "Workspace introuvable" });
     const wsObj = ws.toObject();
@@ -705,7 +723,7 @@ app.post("/api/workspaces/:wsId/logo", authenticateToken, upload.single("logo"),
       if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
     }
 
-    const updated = await Workspace.findByIdAndUpdate(wsId, { logoUrl }, { new: true });
+    const updated = await Workspace.findByIdAndUpdate(wsId, { logoUrl }, { returnDocument: 'after' });
     if (!updated) return res.status(404).json({ success: false, message: "Workspace introuvable" });
 
     const wsObj = updated.toObject();
@@ -724,7 +742,7 @@ app.delete("/api/workspaces/:wsId/logo", authenticateToken, async (req, res, nex
       const filePath = path.join(__dirname, ws.logoUrl);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
-    const updated = await Workspace.findByIdAndUpdate(req.params.wsId, { logoUrl: "" }, { new: true });
+    const updated = await Workspace.findByIdAndUpdate(req.params.wsId, { logoUrl: "" }, { returnDocument: 'after' });
     const wsObj = updated.toObject();
     wsObj.company = wsObj.name;
     wsObj.id      = wsObj._id;
@@ -768,7 +786,7 @@ app.put("/api/workspaces/:wsId/formations/:id", async (req, res, next) => {
   try {
     const f = await Formation.findOneAndUpdate(
       { _id: req.params.id, workspaceId: req.params.wsId },
-      req.body, { new: true, runValidators: true }
+      req.body, { returnDocument: 'after', runValidators: true }
     );
     if (!f) return res.status(404).json({ success: false, message: "Formation introuvable" });
     const esc = f.intitule.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -805,7 +823,7 @@ app.post("/api/workspaces/:wsId/formations/import", async (req, res, next) => {
             contenu: f.contenu || "", duree: f.duree || "", niveau: f.niveau || "",
             publicCible: f.publicCible || f.public || "", prerequis: f.prerequis || "",
             extraData: f.extraData || {}, batchId, fileName },
-          { upsert: true, new: true, runValidators: true }
+          { upsert: true, returnDocument: 'after', runValidators: true }
         );
         upserted++;
         const esc = intitule.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -863,7 +881,7 @@ app.put("/api/workspaces/:wsId/cabinets/:id", async (req, res, next) => {
   try {
     const c = await Cabinet.findOneAndUpdate(
       { _id: req.params.id, workspaceId: req.params.wsId },
-      req.body, { new: true, runValidators: true }
+      req.body, { returnDocument: 'after', runValidators: true }
     );
     if (!c) return res.status(404).json({ success: false, message: "Cabinet introuvable" });
     const esc = c.intitule.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -900,7 +918,7 @@ app.post("/api/workspaces/:wsId/cabinets/import", async (req, res, next) => {
           { workspaceId: wsId, intitule, cabinet: cab.cabinet.trim(), cnss: cab.cnss || "",
             lieu: cab.lieu || "", cout: cab.cout || "", contact: cab.contact || "",
             formateur: cab.formateur || "", extraData: cab.extraData || {}, batchId, fileName },
-          { upsert: true, new: true, runValidators: true }
+          { upsert: true, returnDocument: 'after', runValidators: true }
         );
         upserted++;
         const esc = intitule.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -997,7 +1015,7 @@ app.put("/api/workspaces/:wsId/candidats/:id", async (req, res, next) => {
     const enriched = applyEnrichissement(req.body, formIdx, cabIdx);
     const c = await Candidat.findOneAndUpdate(
       { _id: req.params.id, workspaceId: wsId },
-      enriched, { new: true, runValidators: true }
+      enriched, { returnDocument: 'after', runValidators: true }
     );
     if (!c) return res.status(404).json({ success: false, message: "Candidat introuvable" });
     res.json({ success: true, data: c });
@@ -1121,7 +1139,7 @@ app.post("/api/workspaces/:wsId/tasks/bulk", async (req, res, next) => {
 app.patch("/api/tasks/:id/dates", async (req, res, next) => {
   try {
     const { start, end } = req.body;
-    const task = await Task.findByIdAndUpdate(req.params.id, { start, end }, { new: true });
+    const task = await Task.findByIdAndUpdate(req.params.id, { start, end }, { returnDocument: 'after' });
     if (!task) return res.status(404).json({ success: false, message: "Tâche introuvable" });
     await Promise.all([
       Candidat.updateMany(
@@ -1139,7 +1157,7 @@ app.patch("/api/tasks/:id/dates", async (req, res, next) => {
 
 app.put("/api/tasks/:id", async (req, res, next) => {
   try {
-    const task = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const task = await Task.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after' });
     if (!task) return res.status(404).json({ success: false, message: "Tâche introuvable" });
     await Promise.all([
       Candidat.updateMany(
@@ -1218,7 +1236,7 @@ app.put("/api/workspaces/:wsId/documents/:id", async (req, res, next) => {
   try {
     const d = await Document.findOneAndUpdate(
       { _id: req.params.id, workspaceId: req.params.wsId },
-      req.body, { new: true }
+      req.body, { returnDocument: 'after' }
     );
     if (!d) return res.status(404).json({ success: false, message: "Document introuvable" });
     res.json({ success: true, data: d });
@@ -1266,7 +1284,7 @@ app.post("/api/workspaces/:wsId/gantt", async (req, res, next) => {
     const snap = await GanttSnapshot.findOneAndUpdate(
       { workspaceId: wsId },
       { workspaceId: wsId, tasks: slimTasks, candidats: slimCands, savedAt: new Date() },
-      { upsert: true, new: true, runValidators: false }
+      { upsert: true, returnDocument: 'after', runValidators: false }
     );
 
     res.status(201).json({
@@ -1290,7 +1308,7 @@ app.patch("/api/workspaces/:wsId/gantt/tasks", async (req, res, next) => {
     const snap = await GanttSnapshot.findOneAndUpdate(
       { workspaceId: wsId },
       { $set: { tasks: slimTasks, savedAt: new Date() } },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     res.json({ success: true, savedAt: snap.savedAt, totalTasks: slimTasks.length });
@@ -1394,7 +1412,7 @@ app.patch("/api/workspaces/:wsId/export-base", async (req, res, next) => {
     const updatedWorkspace = await Workspace.findByIdAndUpdate(
       wsId, 
       { hasExportBase: true }, 
-      { new: true } // Indispensable pour renvoyer la nouvelle version
+      { returnDocument: 'after' } // Indispensable pour renvoyer la nouvelle version
     );
 
     // 3. On renvoie le WORKSPACE (c'est ce que App.js attend pour se mettre à jour)
@@ -1409,27 +1427,21 @@ app.patch("/api/workspaces/:wsId/export-base", async (req, res, next) => {
 app.post("/api/workspaces/:wsId/multi-import/init", async (req, res, next) => {
   try {
     const wsId = req.params.wsId;
-    const { batchId = "", clearFormations = false, clearCabinets = false } = req.body;
-    const ws = await Workspace.findById(wsId);
-    if (!ws) return res.status(404).json({ success: false, message: "Workspace introuvable" });
-    const [cRes, tRes, dRes, fRes, bRes] = await Promise.all([
+    // On force la suppression de TOUT ce qui est lié au planning
+    await Promise.all([
       Candidat.deleteMany({ workspaceId: wsId }),
       Task.deleteMany({ workspaceId: wsId }),
       Document.deleteMany({ workspaceId: wsId }),
-      clearFormations ? Formation.deleteMany({ workspaceId: wsId }) : Promise.resolve({ deletedCount: 0 }),
-      clearCabinets   ? Cabinet.deleteMany({ workspaceId: wsId })   : Promise.resolve({ deletedCount: 0 }),
+      Formation.deleteMany({ workspaceId: wsId }), // Vide la base 2
+      Cabinet.deleteMany({ workspaceId: wsId }),   // Vide la base 3 (Règle le problème M2S)
+      GanttSnapshot.findOneAndDelete({ workspaceId: wsId }), // Supprime le cache Gantt
+      ExportBase.findOneAndDelete({ workspaceId: wsId })     // Supprime la base export
     ]);
-    res.json({
-      success: true, batchId,
-      cleared: {
-        candidats:  cRes.deletedCount,
-        tasks:      tRes.deletedCount,
-        documents:  dRes.deletedCount,
-        formations: clearFormations ? fRes.deletedCount : "conservées",
-        cabinets:   clearCabinets   ? bRes.deletedCount : "conservés",
-      },
-      message: "Workspace prêt pour l'import",
-    });
+
+    // On remet le flag du workspace à false
+    await Workspace.findByIdAndUpdate(wsId, { hasExportBase: false });
+
+    res.json({ success: true, message: "Workspace intégralement nettoyé" });
   } catch (e) { next(e); }
 });
 
@@ -1451,7 +1463,7 @@ app.post("/api/workspaces/:wsId/multi-import/formations", async (req, res, next)
             contenu: f.contenu || "", duree: f.duree || "", niveau: f.niveau || "",
             publicCible: f.publicCible || f.public || "", prerequis: f.prerequis || "",
             extraData: f.extraData || {}, batchId, fileName },
-          { upsert: true, new: true, runValidators: true }
+          { upsert: true, returnDocument: 'after', runValidators: true }
         );
         upserted++;
       } catch (e) { errors.push({ intitule: f.intitule, error: e.message }); }
@@ -1482,7 +1494,7 @@ app.post("/api/workspaces/:wsId/multi-import/cabinets", async (req, res, next) =
             cnss: cab.cnss || "", lieu: cab.lieu || "", cout: cab.cout || "",
             contact: cab.contact || "", formateur: cab.formateur || "",
             extraData: cab.extraData || {}, batchId, fileName },
-          { upsert: true, new: true, runValidators: true }
+          { upsert: true, returnDocument: 'after', runValidators: true }
         );
         upserted++;
       } catch (e) { errors.push({ intitule: cab.intitule, error: e.message }); }

@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback, useMemo, memo  } from "react";
+import React , { useState, useEffect, useRef, useCallback, useMemo, memo  } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { createPortal } from "react-dom";
 import logo from '../assets/logoM2S.png'
+
 
 
 import * as XLSX from "xlsx";
@@ -27,6 +28,47 @@ import autoTable from "jspdf-autotable";
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import { saveAs } from "file-saver";
+import {
+  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+  AlignmentType, BorderStyle, WidthType, ShadingType, VerticalAlign,
+} from "docx";
+
+const isTauri = !!window.__TAURI_METADATA__;
+
+const downloadFile = async (data, filename, extension) => {
+  if (!window.__TAURI_METADATA__) {
+    const blob = new Blob([data]);
+    saveAs(blob, `${filename}.${extension}`);
+    return;
+  }
+
+  try {
+    const path = await save({
+      defaultPath: await downloadDir() + `/${filename}.${extension}`,
+      filters: [{ name: extension.toUpperCase(), extensions: [extension] }]
+    });
+
+    if (path) {
+      // writeFile en v2 gère automatiquement les Uint8Array
+      await writeFile(path, new Uint8Array(data));
+    }
+  } catch (err) {
+    console.error("Erreur de sauvegarde desktop:", err);
+  }
+};
+
+// À mettre tout en haut du fichier (après les imports)
+const extractArray = (r, key) => {
+  if (Array.isArray(r)) return r;
+  if (r && Array.isArray(r[key])) return r[key];
+  if (r && Array.isArray(r.data)) return r.data;
+  if (r && Array.isArray(r.items)) return r.items;
+  if (r && typeof r === "object") {
+    const found = Object.values(r).find(Array.isArray);
+    if (found) return found;
+  }
+  return [];
+};
 
 function ConfirmModal({ title, message, onConfirm, onCancel, confirmLabel = "Quitter", cancelLabel = "Rester", isDestructive = true }) {
   return createPortal(
@@ -126,7 +168,7 @@ const generateAttendancePDF = (doc, allCandidates) => {
 };
 
 const API_BASE = (typeof import_meta_env !== "undefined" && import_meta_env?.VITE_API_URL)
-  || "https://sparkling-empathy-production-05b3.up.railway.app/api";
+  || "http://localhost:5000/api";
 
 function norm(o) {
   if (!o) return o;
@@ -842,7 +884,7 @@ function MenuToggleButton({ open, onToggle }) {
 // ══════════════════════════════════════════════════════
 // SIDEBAR RESPONSIVE COMPLÈTE
 // ══════════════════════════════════════════════════════
-function Sidebar({ workspaces, activeWs, onSelectWs, section, onSection, onCreateWs, open, onToggle, apiOnline, currentUser, onLogout }) {
+function Sidebar({ workspaces, activeWs, onSelectWs, section, onSection, onCreateWs, open, onToggle, apiOnline, currentUser, onLogout, globalYear, onYearChange }) {
   const { w } = useWindowSize();
   const isMobile = w < 640;
  
@@ -851,13 +893,20 @@ function Sidebar({ workspaces, activeWs, onSelectWs, section, onSection, onCreat
   const dropRef = useRef(null);
   const userMenuRef = useRef(null);
   const ws = workspaces.find(wk => wk.id === activeWs);
+
+  const [wsSearch, setWsSearch] = useState("");
+const [wsYearFilter, setWsYearFilter] = useState(null);
  
   useEffect(() => {
-    if (!wsOpen) return;
-    const h = e => { if (dropRef.current && !dropRef.current.contains(e.target)) setWsOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [wsOpen]);
+  if (!wsOpen) {
+    setWsSearch("");
+    setWsYearFilter(null);
+    return;
+  }
+  const h = e => { if (dropRef.current && !dropRef.current.contains(e.target)) setWsOpen(false); };
+  document.addEventListener("mousedown", h);
+  return () => document.removeEventListener("mousedown", h);
+}, [wsOpen]);
  
   useEffect(() => {
     if (!userMenuOpen) return;
@@ -985,73 +1034,223 @@ function Sidebar({ workspaces, activeWs, onSelectWs, section, onSection, onCreat
             </>)}
  
             {/* ── Dropdown workspaces ── */}
-            {wsOpen && (
-              <div style={{
-                position: "absolute", top: "calc(100% + 2px)", left: 8, right: 8,
-                background: "#fff", borderRadius: 6,
-                border: `1px solid ${T.sidebarBdr}`,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)",
-                zIndex: 100, overflow: "hidden", padding: 4,
+{wsOpen && (
+  <div style={{
+    position: "absolute", top: "calc(100% + 2px)", left: 8, right: 8,
+    background: "#fff", borderRadius: 6,
+    border: `1px solid ${T.sidebarBdr}`,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)",
+    zIndex: 100, padding: 4,
+  }}>
+
+    <style>{`
+      .ws-year-pills::-webkit-scrollbar { display: none; }
+      .ws-list::-webkit-scrollbar { width: 4px; }
+      .ws-list::-webkit-scrollbar-track { background: transparent; }
+      .ws-list::-webkit-scrollbar-thumb { background: rgba(55,53,47,0.2); border-radius: 99px; }
+    `}</style>
+
+    {/* ── Barre de recherche ── */}
+    <div style={{ padding: "4px 4px 6px", display: "flex", flexDirection: "column", gap: 5 }}>
+      <div style={{ position: "relative" }}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.sidebarSub} strokeWidth="2" strokeLinecap="round"
+          style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input
+          autoFocus
+          value={wsSearch}
+          onChange={e => setWsSearch(e.target.value)}
+          placeholder="Rechercher un client…"
+          style={{
+            width: "100%", boxSizing: "border-box",
+            padding: "5px 26px 5px 26px",
+            fontSize: 12, fontFamily: "inherit",
+            border: `1px solid rgba(55,53,47,0.15)`,
+            borderRadius: 4, outline: "none",
+            color: T.sidebarText, background: "rgba(55,53,47,0.04)",
+          }}
+        />
+        {wsSearch && (
+          <button onClick={() => setWsSearch("")}
+            style={{
+              position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+              border: "none", background: "transparent", cursor: "pointer", padding: 0,
+              display: "flex", alignItems: "center", color: T.sidebarSub,
+            }}>
+            <X style={{ width: 10, height: 10 }} />
+          </button>
+        )}
+      </div>
+
+      {/* ── Filtres année ── */}
+      {(() => {
+        const allYears = [...new Set(workspaces.map(wk => wk.annee || new Date(wk.startDate).getFullYear()))].sort((a, b) => b - a);
+        if (allYears.length <= 1) return null;
+        return (
+          <div className="ws-year-pills" style={{
+            display: "flex", gap: 3,
+            overflowX: "auto", flexWrap: "nowrap",
+            paddingBottom: 2,
+            msOverflowStyle: "none", scrollbarWidth: "none",
+          }}>
+            <button
+              onClick={() => setWsYearFilter(null)}
+              style={{
+                flexShrink: 0,
+                padding: "2px 7px", fontSize: 10, fontWeight: 600, fontFamily: "inherit",
+                borderRadius: 3, border: `1px solid ${wsYearFilter === null ? T.accent : "rgba(55,53,47,0.15)"}`,
+                background: wsYearFilter === null ? T.accent : "transparent",
+                color: wsYearFilter === null ? "#fff" : T.sidebarSub,
+                cursor: "pointer",
               }}>
-                {workspaces.map((wk, index) => (
-                  <button
-                    key={wk.id || `ws-${index}`}
-                    onClick={() => { onSelectWs(wk.id); setWsOpen(false); }}
-                    style={{
-                      width: "100%", display: "flex", alignItems: "center", gap: 8,
-                      padding: "7px 8px", borderRadius: 4, border: "none",
-                      background: wk.id === activeWs ? T.sidebarSel : "transparent",
-                      cursor: "pointer", textAlign: "left", transition: "background 0.08s",
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = T.sidebarHov}
-                    onMouseLeave={e => e.currentTarget.style.background = wk.id === activeWs ? T.sidebarSel : "transparent"}
-                  >
-                    {/* Logo dans le dropdown — 32×32 */}
-                    <div style={{
-                      width: 32, height: 32, borderRadius: 6,
-                      border: "1px solid #e3e3e2", background: "#fff",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      flexShrink: 0, overflow: "hidden",
-                    }}>
-                      {wk.logoUrl
-                        ? <img
-                            src={`${API_BASE.replace("/api", "")}${wk.logoUrl}`}
-                            alt=""
-                            style={{ width: "100%", height: "100%", objectFit: "contain", padding: 3, boxSizing: "border-box" }}
-                          />
-                        : <Building2 style={{ width: 14, height: 14, color: T.sidebarSub }} />
-                      }
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        fontSize: 12, fontWeight: 600, color: T.sidebarText,
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>
-                        {wk.company}
-                      </div>
-                      <div style={{ fontSize: 10, color: T.sidebarSub }}>{fmtRangeShort(wk)}</div>
-                    </div>
-                    {wk.id === activeWs && <Check style={{ width: 12, height: 12, color: T.sidebarSub, flexShrink: 0 }} />}
-                  </button>
-                ))}
- 
-                <div style={{ height: 1, background: T.sidebarBdr, margin: "4px 0" }} />
- 
-                <button
-                  onClick={() => { onCreateWs(); setWsOpen(false); }}
-                  style={{
-                    width: "100%", display: "flex", alignItems: "center", gap: 8,
-                    padding: "6px 8px", borderRadius: 4, border: "none",
-                    background: "transparent", cursor: "pointer", transition: "background 0.08s",
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = T.sidebarHov}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                >
-                  <Plus style={{ width: 14, height: 14, color: T.sidebarSub }} />
-                  <span style={{ fontSize: 12, color: T.sidebarSub }}>Ajouter un workspace</span>
-                </button>
+              Toutes
+            </button>
+            {allYears.map(y => (
+              <button key={y}
+                onClick={() => {
+                  const newFilter = wsYearFilter === y ? null : y;
+                  setWsYearFilter(newFilter);
+                  if (newFilter !== null) onYearChange?.(newFilter);
+                }}
+                style={{
+                  flexShrink: 0,
+                  padding: "2px 7px", fontSize: 10, fontWeight: 600, fontFamily: "inherit",
+                  borderRadius: 3, border: `1px solid ${wsYearFilter === y ? "#185fa5" : "rgba(55,53,47,0.15)"}`,
+                  background: wsYearFilter === y ? "#e6f1fb" : "transparent",
+                  color: wsYearFilter === y ? "#185fa5" : T.sidebarSub,
+                  cursor: "pointer",
+                }}>
+                {y}
+              </button>
+            ))}
+          </div>
+        );
+      })()}
+    </div>
+
+    <div style={{ height: 1, background: T.sidebarBdr, margin: "0 0 4px" }} />
+
+    {/* ── Liste filtrée avec scroll ── */}
+    <div className="ws-list" style={{
+      maxHeight: 200,
+      overflowY: "auto",
+      scrollbarWidth: "thin",
+      scrollbarColor: "rgba(55,53,47,0.2) transparent",
+    }}>
+      {(() => {
+        let list;
+        if (wsYearFilter !== null) {
+          list = workspaces.filter(wk => {
+            const year = wk.annee || new Date(wk.startDate).getFullYear();
+            return year === wsYearFilter;
+          });
+        } else {
+          const byClient = {};
+          workspaces.forEach(wk => {
+            const key = (wk.company || wk.name || "").trim().toLowerCase();
+            const year = wk.annee || new Date(wk.startDate).getFullYear();
+            if (!byClient[key]) byClient[key] = {};
+            byClient[key][year] = wk;
+          });
+          list = Object.values(byClient).map(yearMap => {
+            const years = Object.keys(yearMap).map(Number);
+            return yearMap[Math.max(...years)];
+          }).filter(Boolean);
+        }
+
+        const q = wsSearch.trim().toLowerCase();
+        if (q) list = list.filter(wk => (wk.company || wk.name || "").toLowerCase().includes(q));
+
+        list = list.sort((a, b) =>
+          (a.company || a.name || "").toLowerCase().localeCompare((b.company || b.name || "").toLowerCase())
+        );
+
+        if (list.length === 0) return (
+          <div style={{ padding: "12px 8px", textAlign: "center", fontSize: 12, color: T.sidebarSub, fontStyle: "italic" }}>
+            Aucun résultat
+          </div>
+        );
+
+        return list.map((wk, index) => {
+          const year = wk.annee || new Date(wk.startDate).getFullYear();
+          const isActive = wk.id === activeWs;
+          return (
+            <button
+              key={wk.id || `ws-${index}`}
+              onClick={() => {
+                onSelectWs(wk.id);
+                onYearChange?.(year);
+                setWsOpen(false);
+                setWsSearch("");
+                setWsYearFilter(null);
+              }}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 8,
+                padding: "7px 8px", borderRadius: 4, border: "none",
+                background: isActive ? T.sidebarSel : "transparent",
+                cursor: "pointer", textAlign: "left", transition: "background 0.08s",
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = isActive ? T.sidebarSel : T.sidebarHov}
+              onMouseLeave={e => e.currentTarget.style.background = isActive ? T.sidebarSel : "transparent"}
+            >
+              <div style={{
+                width: 32, height: 32, borderRadius: 6, border: "1px solid #e3e3e2",
+                background: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0, overflow: "hidden",
+              }}>
+                {wk.logoUrl
+                  ? <img src={`${API_BASE.replace("/api", "")}${wk.logoUrl}`} alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "contain", padding: 3, boxSizing: "border-box" }} />
+                  : <Building2 style={{ width: 14, height: 14, color: T.sidebarSub }} />
+                }
               </div>
-            )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 12, fontWeight: 600, color: T.sidebarText,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {wk.company || wk.name}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 1 }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: "0px 5px", borderRadius: 3,
+                    background: year === globalYear ? "#e6f1fb" : "rgba(55,53,47,0.07)",
+                    color: year === globalYear ? "#185fa5" : T.sidebarSub,
+                    border: `1px solid ${year === globalYear ? "#b5d4f4" : "rgba(55,53,47,0.12)"}`,
+                  }}>
+                    {year}
+                  </span>
+                  {year === new Date().getFullYear() && (
+                    <span style={{ fontSize: 9, color: "#185fa5" }}>en cours</span>
+                  )}
+                </div>
+              </div>
+              {isActive && <Check style={{ width: 12, height: 12, color: T.sidebarSub, flexShrink: 0 }} />}
+            </button>
+          );
+        });
+      })()}
+    </div>
+
+    <div style={{ height: 1, background: T.sidebarBdr, margin: "4px 0" }} />
+
+    <button
+      onClick={() => { onCreateWs(); setWsOpen(false); setWsSearch(""); setWsYearFilter(null); }}
+      style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 8,
+        padding: "6px 8px", borderRadius: 4, border: "none",
+        background: "transparent", cursor: "pointer", transition: "background 0.08s",
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = T.sidebarHov}
+      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+    >
+      <Plus style={{ width: 14, height: 14, color: T.sidebarSub }} />
+      <span style={{ fontSize: 12, color: T.sidebarSub }}>Ajouter un workspace</span>
+    </button>
+
+  </div>
+)}
           </div>
  
           {/* ── Navigation ── */}
@@ -1208,16 +1407,29 @@ function Sidebar({ workspaces, activeWs, onSelectWs, section, onSection, onCreat
   );
 }
 
-function WsModal({ onClose, onCreate }) {
-  const [company,   setCompany]   = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate,   setEndDate]   = useState("");
-  const [saving,    setSaving]    = useState(false);
-  const [logoFile,  setLogoFile]  = useState(null);      // ← File object
-  const [logoPreview, setLogoPreview] = useState(null);  // ← base64 preview
+function WsModal({ onClose, onCreate, onUpdateWs }) {
+  const currentYear = new Date().getFullYear();
+  const [company,     setCompany]     = useState("");
+  const [annee,       setAnnee]       = useState(currentYear);
+  const [saving,      setSaving]      = useState(false);
+  const [logoFile,    setLogoFile]    = useState(null);
+  const [logoPreview, setLogoPreview] = useState(null);
   const fileInputRef = useRef(null);
 
-  const canCreate = company.trim() && startDate && endDate && startDate <= endDate;
+  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
+const [endDate,   setEndDate]   = useState(`${currentYear}-12-31`);
+
+// Sync automatique quand on change d'année (si l'utilisateur n'a pas touché)
+// (géré via useEffect)
+useEffect(() => {
+  setStartDate(`${annee}-01-01`);
+  setEndDate(`${annee}-12-31`);
+}, [annee]);
+
+  // Générer les années disponibles : 3 ans avant → 2 ans après
+  const years = Array.from({ length: 6 }, (_, i) => currentYear - 3 + i);
+
+const canCreate = company.trim() && annee && startDate && endDate && startDate <= endDate;
 
   const handleLogoChange = (e) => {
     const file = e.target.files?.[0];
@@ -1239,18 +1451,24 @@ function WsModal({ onClose, onCreate }) {
     if (!canCreate || saving) return;
     setSaving(true);
     try {
-      // 1. Créer le workspace
-      const ws = await onCreate({ company: company.trim(), name: company.trim(), startDate, endDate });
+const ws = await onCreate({
+  company:   company.trim(),
+  name:      company.trim(),
+  annee,
+  startDate,  // ← valeur du state, pas `${annee}-01-01`
+  endDate,    // ← valeur du state
+});
 
-      // 2. Upload du logo si présent (onCreate doit retourner le ws créé)
       if (logoFile && ws?.id) {
         const fd = new FormData();
         fd.append("logo", logoFile);
-        await fetch(`${API_BASE}/workspaces/${ws.id}/logo`, {
+        const res = await fetch(`${API_BASE}/workspaces/${ws.id}/logo`, {
           method: "POST",
-headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` },
+          headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` },
           body: fd,
         });
+        const data = await res.json();
+        if (data.success && onUpdateWs) onUpdateWs(data.data);
       }
       onClose();
     } catch (e) {
@@ -1259,95 +1477,139 @@ headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` }
     setSaving(false);
   };
 
-  const iS = { width:"100%", boxSizing:"border-box", padding:"7px 10px", borderRadius:4, border:`1px solid rgba(55,53,47,0.2)`, fontSize:13, color:T.pageText, outline:"none", fontFamily:"inherit", background:"#fff", transition:"box-shadow 0.12s,border-color 0.12s" };
-  const fI = e => { e.target.style.borderColor=T.accent; e.target.style.boxShadow=`0 0 0 2px ${T.accent}22`; };
-  const fO = e => { e.target.style.borderColor="rgba(55,53,47,0.2)"; e.target.style.boxShadow="none"; };
-  const dur = startDate && endDate && startDate <= endDate ? gdb(pd(startDate), pd(endDate)) + 1 : null;
+  const iS = {
+    width: "100%", boxSizing: "border-box", padding: "7px 10px",
+    borderRadius: 4, border: `1px solid rgba(55,53,47,0.2)`, fontSize: 13,
+    color: T.pageText, outline: "none", fontFamily: "inherit",
+    background: "#fff", transition: "box-shadow 0.12s,border-color 0.12s"
+  };
+  const fI = e => { e.target.style.borderColor = T.accent; e.target.style.boxShadow = `0 0 0 2px ${T.accent}22`; };
+  const fO = e => { e.target.style.borderColor = "rgba(55,53,47,0.2)"; e.target.style.boxShadow = "none"; };
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:500, background:"rgba(0,0,0,0.35)", display:"flex", alignItems:"center", justifyContent:"center" }}
-      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background:"#fff", borderRadius:8, boxShadow:"0 16px 48px rgba(0,0,0,0.18)", width:"min(420px,95vw)", border:`1px solid rgba(55,53,47,0.13)`, overflow:"hidden" }}>
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ background: "#fff", borderRadius: 8, boxShadow: "0 16px 48px rgba(0,0,0,0.18)", width: "min(420px,95vw)", border: `1px solid rgba(55,53,47,0.13)`, overflow: "hidden" }}>
 
         {/* Header */}
-        <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${T.pageBdr}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <span style={{ fontSize:16, fontWeight:700, color:T.pageText, letterSpacing:"-0.02em" }}>Nouveau workspace</span>
-          <button onClick={onClose} style={{ width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:4, border:"none", background:"transparent", cursor:"pointer", color:T.pageSub }}>
-            <X style={{ width:14, height:14 }}/>
+        <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${T.pageBdr}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 16, fontWeight: 700, color: T.pageText, letterSpacing: "-0.02em" }}>Nouveau workspace</span>
+          <button onClick={onClose} style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", color: T.pageSub }}>
+            <X style={{ width: 14, height: 14 }} />
           </button>
         </div>
 
-        <div style={{ padding:"18px 24px 20px", display:"flex", flexDirection:"column", gap:14 }}>
+        <div style={{ padding: "18px 24px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
 
-          {/* ── Logo upload ── */}
+          {/* Logo upload */}
           <div>
-            <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:8 }}>
-              Logo de l'entreprise
-            </div>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              {/* Zone logo */}
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Logo de l'entreprise</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div
                 onClick={() => fileInputRef.current?.click()}
-                style={{ width:56, height:56, borderRadius:8, border:`1.5px dashed ${logoPreview?"transparent":"rgba(55,53,47,0.25)"}`, background: logoPreview?"transparent":"rgba(55,53,47,0.03)", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0, overflow:"hidden", position:"relative", transition:"border-color 0.12s" }}
-                onMouseEnter={e => { if (!logoPreview) e.currentTarget.style.borderColor=T.accent; }}
-                onMouseLeave={e => { if (!logoPreview) e.currentTarget.style.borderColor="rgba(55,53,47,0.25)"; }}
+                style={{ width: 56, height: 56, borderRadius: 8, border: `1.5px dashed ${logoPreview ? "transparent" : "rgba(55,53,47,0.25)"}`, background: logoPreview ? "transparent" : "rgba(55,53,47,0.03)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, overflow: "hidden" }}
               >
-                {logoPreview ? (
-                  <img src={logoPreview} alt="logo" style={{ width:"100%", height:"100%", objectFit:"contain" }}/>
-                ) : (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(55,53,47,0.3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-                  </svg>
-                )}
+                {logoPreview
+                  ? <img src={logoPreview} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                  : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(55,53,47,0.3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                }
               </div>
-
-              <div style={{ flex:1 }}>
-                <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" onChange={handleLogoChange} style={{ display:"none" }}/>
-                <div style={{ display:"flex", gap:6 }}>
-                  <button onClick={() => fileInputRef.current?.click()} style={{ flex:1, padding:"6px 0", fontSize:12, color:T.pageSub, background:"transparent", border:`1px solid rgba(55,53,47,0.2)`, borderRadius:4, cursor:"pointer", fontFamily:"inherit" }}>
+              <div style={{ flex: 1 }}>
+                <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" onChange={handleLogoChange} style={{ display: "none" }} />
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => fileInputRef.current?.click()} style={{ flex: 1, padding: "6px 0", fontSize: 12, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
                     {logoPreview ? "Changer" : "Choisir un fichier"}
                   </button>
                   {logoPreview && (
-                    <button onClick={removeLogo} style={{ width:30, height:30, display:"flex", alignItems:"center", justifyContent:"center", border:`1px solid rgba(212,76,71,0.25)`, borderRadius:4, background:"transparent", cursor:"pointer", color:"#d44c47" }}>
-                      <X style={{ width:12, height:12 }}/>
+                    <button onClick={removeLogo} style={{ width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid rgba(212,76,71,0.25)`, borderRadius: 4, background: "transparent", cursor: "pointer", color: "#d44c47" }}>
+                      <X style={{ width: 12, height: 12 }} />
                     </button>
                   )}
                 </div>
-                <div style={{ fontSize:10, color:T.pageTer, marginTop:4 }}>PNG, JPG, SVG — max 2 Mo</div>
+                <div style={{ fontSize: 10, color: T.pageTer, marginTop: 4 }}>PNG, JPG, SVG — max 2 Mo</div>
               </div>
             </div>
           </div>
 
           {/* Entreprise */}
           <div>
-            <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:5 }}>Entreprise / Client</div>
-            <input autoFocus value={company} onChange={e=>setCompany(e.target.value)} onKeyDown={e=>e.key==="Enter"&&create()} placeholder="Ex: TechCorp Maroc" style={iS} onFocus={fI} onBlur={fO}/>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 5 }}>Entreprise / Client</div>
+            <input
+              autoFocus value={company} onChange={e => setCompany(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && create()}
+              placeholder="Ex: TechCorp Maroc"
+              style={iS} onFocus={fI} onBlur={fO}
+            />
           </div>
 
-          {/* Période */}
+          {/* Année — remplace la période libre */}
           <div>
-            <div style={{ fontSize:11, fontWeight:600, color:T.pageSub, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:8 }}>Période</div>
-            <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:11, color:T.pageTer, marginBottom:4 }}>Début</div>
-                <input type="date" value={startDate} onChange={e=>{ setStartDate(e.target.value); if(endDate&&e.target.value>endDate)setEndDate(""); }} style={iS} onFocus={fI} onBlur={fO}/>
-              </div>
-              <div style={{ paddingBottom:9, color:T.pageTer, fontSize:13 }}>→</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:11, color:T.pageTer, marginBottom:4 }}>Fin</div>
-                <input type="date" value={endDate} min={startDate||undefined} onChange={e=>setEndDate(e.target.value)} style={iS} onFocus={fI} onBlur={fO}/>
-              </div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Année du plan de formation</div>
+            <div style={{ display: "flex", gap:8, flexWrap: "wrap" }}>
+              {years.map(y => (
+                <button
+                  key={y}
+                  onClick={() => setAnnee(y)}
+                  style={{
+                    flex: "1 1 60px", padding: "8px 0", fontSize: 14, fontWeight: y === annee ? 700 : 400,
+                    color: y === annee ? "#fff" : y === currentYear ? T.accent : T.pageSub,
+                    background: y === annee ? T.accent : y === currentYear ? `${T.accent}12` : "rgba(55,53,47,0.04)",
+                    border: `1px solid ${y === annee ? T.accent : y === currentYear ? `${T.accent}40` : "rgba(55,53,47,0.15)"}`,
+                    borderRadius: 4, cursor: "pointer", fontFamily: "inherit",
+                    position: "relative", transition: "all 0.1s",
+                  }}
+                >
+                  {y}
+                  {y === currentYear && y !== annee && (
+                    <span style={{ position: "absolute", top: -6, right: -4, fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 99, background: T.accent, color: "#fff" }}>•</span>
+                  )}
+                </button>
+              ))}
             </div>
-            {dur && (
-              <div style={{ display:"flex", alignItems:"center", gap:5, marginTop:8, padding:"5px 10px", borderRadius:4, background:"rgba(55,53,47,0.04)", border:`1px solid ${T.pageBdr}`, width:"fit-content" }}>
-                <CalendarRange style={{ width:12, height:12, color:T.pageSub }}/>
-                <span style={{ fontSize:12, color:T.pageSub, fontWeight:500 }}>{dur} jour{dur>1?"s":""}</span>
-              </div>
-            )}
+            {/* Résumé période calculée */}
+            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+  <div style={{ flex:1 }}>
+    <div style={{ fontSize:10, color:T.pageTer, marginBottom:3 }}>Date début</div>
+    <input
+      type="date"
+      value={startDate}
+      onChange={e => setStartDate(e.target.value)}
+      style={iS}
+      onFocus={fI} onBlur={fO}
+    />
+  </div>
+  <div style={{ flex:1 }}>
+    <div style={{ fontSize:10, color:T.pageTer, marginBottom:3 }}>Date fin</div>
+    <input
+      type="date"
+      value={endDate}
+      onChange={e => setEndDate(e.target.value)}
+      style={iS}
+      onFocus={fI} onBlur={fO}
+    />
+  </div>
+</div>
+
+{/* Résumé période */}
+<div style={{ display:"flex", alignItems:"center", gap:5, marginTop:8, padding:"6px 10px", borderRadius:4, background:"rgba(55,53,47,0.04)", border:`1px solid ${T.pageBdr}` }}>
+  <CalendarRange style={{ width:12, height:12, color:T.pageSub }} />
+  <span style={{ fontSize:12, color:T.pageSub, fontWeight:500 }}>
+    {startDate && endDate
+      ? `${new Date(startDate+"T00:00:00").toLocaleDateString("fr-FR")} → ${new Date(endDate+"T00:00:00").toLocaleDateString("fr-FR")}`
+      : `01 jan. ${annee} → 31 déc. ${annee} · 365 jours`
+    }
+  </span>
+</div>
           </div>
 
-          <button onClick={create} disabled={!canCreate||saving} style={{ width:"100%", padding:"9px", fontSize:14, fontWeight:600, color:"#fff", background:canCreate&&!saving?"#37352f":"#ccc", border:"none", borderRadius:4, cursor:canCreate&&!saving?"pointer":"not-allowed", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
-            {saving&&<Spinner size={14} color="#fff"/>}Créer le workspace
+          <button
+            onClick={create} disabled={!canCreate || saving}
+            style={{ width: "100%", padding: "9px", fontSize: 14, fontWeight: 600, color: "#fff", background: canCreate && !saving ? "#37352f" : "#ccc", border: "none", borderRadius: 4, cursor: canCreate && !saving ? "pointer" : "not-allowed", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+          >
+            {saving && <Spinner size={14} color="#fff" />}
+            Créer le workspace {annee}
           </button>
         </div>
       </div>
@@ -1355,7 +1617,7 @@ headers: { Authorization: `Bearer ${localStorage.getItem("gantt_auth_token")}` }
   );
 }
 
-function Overview({ ws, tasks, candidats, documents, onSection, loading, onDeleteWs, onUpdateWs }) {
+function Overview({ ws, tasks, candidats, documents, onSection, loading, onDeleteWs, onUpdateWs, onSelectWs, globalYear, onYearChange }) {
   const { w } = useWindowSize();
   const isMobile = w < 640;
   const isTablet  = w >= 640 && w < 1024;
@@ -1373,6 +1635,12 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
   const [selectedCols,  setSelectedCols]  = useState([]);
   const [dragIdx,       setDragIdx]       = useState(null);
   const [exporting,     setExporting]     = useState(false);
+
+  // Après les useState existants, ajouter :
+  const [showYearPicker, setShowYearPicker] = useState(false);
+  const [yearPickerVal, setYearPickerVal]   = useState(null);
+  const [pendingYear, setPendingYear] = useState(null);
+
 
   const logoInputRef = useRef(null);
 
@@ -1517,8 +1785,9 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
       wsXlsx["!cols"] = headers.map(() => ({ wch: 20 }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, wsXlsx, "Base fusionnée");
-      XLSX.writeFile(wb, `export_${ws.company.replace(/\s+/g,"_")}_${new Date().toISOString().slice(0,10)}.xlsx`);
-    } catch (e) { console.error("Erreur Export:", e); alert("Erreur lors de l'export Excel."); }
+const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+await downloadFile(excelBuffer, `export_${ws.company.replace(/\s+/g,"_")}`, "xlsx");    
+} catch (e) { console.error("Erreur Export:", e); alert("Erreur lors de l'export Excel."); }
     setExporting(false);
   };
 
@@ -1560,17 +1829,36 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
     ? gdb(pd(editForm.startDate), pd(editForm.endDate)) + 1 : null;
 
   const handleDelete = async () => { setDeleting(true); await onDeleteWs(ws.id); setDeleting(false); setConfirmDelete(false); };
-  const startEdit   = () => { setEditForm({ company: ws.company||"", startDate: ws.startDate||"", endDate: ws.endDate||"" }); setEditing(true); };
-  const saveEdit    = async () => {
-    if (!editForm.company.trim() || saving) return;
-    setSaving(true);
-    try {
-      const response = await apiFetch(`/workspaces/${ws.id}`, { method:"PUT", body:{ company:editForm.company.trim(), startDate:editForm.startDate, endDate:editForm.endDate } });
-      onUpdateWs(response.data || response);
-      setEditing(false);
-    } catch (err) { console.error("Erreur saveEdit:", err); }
-    setSaving(false);
-  };
+  // Remplacer startEdit :
+const startEdit = () => {
+  setEditForm({
+    company:   ws.company || "",
+    annee:     ws.annee || new Date().getFullYear(),
+    startDate: ws.startDate || `${ws.annee || new Date().getFullYear()}-01-01`,
+    endDate:   ws.endDate   || `${ws.annee || new Date().getFullYear()}-12-31`,
+  });
+  setEditing(true);
+};
+
+// Remplacer saveEdit :
+const saveEdit = async () => {
+  if (!editForm.company.trim() || saving) return;
+  setSaving(true);
+  try {
+    const response = await apiFetch(`/workspaces/${ws.id}`, {
+      method: "PUT",
+      body: {
+        company:   editForm.company.trim(),
+        annee:     editForm.annee,
+        startDate: editForm.startDate,  // ← dates précises
+        endDate:   editForm.endDate,    // ← dates précises
+      }
+    });
+    onUpdateWs(response.data || response);
+    setEditing(false);
+  } catch (err) { console.error("Erreur saveEdit:", err); }
+  setSaving(false);
+};
 
   const COL_GROUPS_EXPORT = [
     { label:"Identité",   keys:["nom","prenom","matricule","departement","csp"] },
@@ -1620,6 +1908,296 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
           </div>
         </div>
       )}
+
+      {showYearPicker && (
+  <div
+    style={{ position:"fixed", inset:0, zIndex:500, background:"rgba(0,0,0,0.4)", display:"flex", alignItems:"center", justifyContent:"center" }}
+    onMouseDown={e => { if (e.target === e.currentTarget) setShowYearPicker(false); }}
+  >
+    <div style={{ background:"#fff", borderRadius:10, boxShadow:"0 8px 32px rgba(0,0,0,0.12)", width:"min(372px,95vw)", border:`1px solid rgba(55,53,47,0.1)`, overflow:"hidden" }}>
+
+      {/* ── Header ── */}
+      <div style={{ padding:"16px 20px 14px", borderBottom:`1px solid rgba(55,53,47,0.08)`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ width:30, height:30, borderRadius:6, background:"rgba(55,53,47,0.05)", border:`1px solid rgba(55,53,47,0.1)`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+            <CalendarRange style={{ width:14, height:14, color:T.pageSub, strokeWidth:1.8 }} />
+          </div>
+          <div>
+            <div style={{ fontSize:13, fontWeight:600, color:T.pageText, letterSpacing:"-0.01em" }}>
+              Changer d'année
+            </div>
+            <div style={{ fontSize:11, color:T.pageTer, marginTop:2 }}>
+              {ws.company} · actuellement {ws.annee || new Date(ws.startDate).getFullYear()}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowYearPicker(false)}
+          style={{ width:24, height:24, borderRadius:5, border:"none", background:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", padding:0, color:T.pageTer }}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(55,53,47,0.06)"}
+          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+        >
+          <X style={{ width:11, height:11 }} />
+        </button>
+      </div>
+
+      {/* ── Body ── */}
+      <div style={{ padding:"16px 20px 18px", display:"flex", flexDirection:"column", gap:14 }}>
+
+        {/* Légende */}
+        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+            <div style={{ width:6, height:6, borderRadius:"50%", background:T.accent }} />
+            <span style={{ fontSize:11, color:T.pageTer }}>Année en cours</span>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+            <div style={{ width:6, height:6, borderRadius:"50%", border:`1.5px solid rgba(55,53,47,0.3)`, background:"transparent" }} />
+            <span style={{ fontSize:11, color:T.pageTer }}>Workspace actif</span>
+          </div>
+        </div>
+
+        {/* Grille des années */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:6 }}>
+          {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => {
+            const currentWsYear = ws.annee || new Date(ws.startDate).getFullYear();
+            const isActive      = (yearPickerVal ?? currentWsYear) === y;
+            const isCurrent     = y === new Date().getFullYear();
+            const isWsYear      = y === currentWsYear;
+            return (
+              <div key={y} style={{ position:"relative", paddingTop:10, paddingBottom:12 }}>
+
+                {/* Pill "en cours" */}
+                {isCurrent && !isActive && (
+                  <span style={{
+                    position:"absolute", top:0, left:"50%", transform:"translateX(-50%)",
+                    fontSize:9, fontWeight:600, padding:"1px 7px",
+                    borderRadius:99, whiteSpace:"nowrap", pointerEvents:"none", zIndex:1,
+                    background:T.accent, color:"#fff", letterSpacing:"0.02em",
+                  }}>
+                    en cours
+                  </span>
+                )}
+
+                <button
+                  onClick={() => setYearPickerVal(y)}
+                  style={{
+                    width:"100%", padding:"11px 0", fontSize:14,
+                    letterSpacing:"-0.02em", fontFamily:"inherit",
+                    borderRadius:5, cursor:"pointer", textAlign:"center",
+                    transition:"all 0.12s", outline:"none",
+                    fontWeight: isActive ? 600 : 400,
+                    color: isActive ? "#fff" : T.pageText,
+                    background: isActive ? T.accent : "rgba(55,53,47,0.03)",
+                    border: isActive
+                      ? `1px solid ${T.accent}`
+                      : isWsYear
+                        ? `1.5px solid rgba(55,53,47,0.28)`
+                        : `1px solid rgba(55,53,47,0.1)`,
+                  }}
+                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "rgba(55,53,47,0.07)"; }}
+                  onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "rgba(55,53,47,0.03)"; }}
+                >
+                  {y}
+                </button>
+
+                {/* Dot "actif" */}
+                {isWsYear && !isActive && (
+                  <div style={{
+                    position:"absolute", bottom:1, left:"50%", transform:"translateX(-50%)",
+                    display:"flex", alignItems:"center", gap:3,
+                    whiteSpace:"nowrap", pointerEvents:"none",
+                  }}>
+                    <div style={{ width:4, height:4, borderRadius:"50%", background:T.pageTer }} />
+                    <span style={{ fontSize:9, color:T.pageTer }}>actif</span>
+                  </div>
+                )}
+
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Bannière basculement */}
+        {yearPickerVal && yearPickerVal !== (ws.annee || new Date(ws.startDate).getFullYear()) && (
+          <div style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 12px", borderRadius:6, background:"#e6f1fb", border:"1px solid #b5d4f4" }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="2" strokeLinecap="round" style={{ flexShrink:0 }}>
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+            <span style={{ fontSize:12, color:"#185fa5", fontWeight:500, letterSpacing:"-0.01em" }}>
+              Plan {yearPickerVal} · 01/01/{yearPickerVal} → 31/12/{yearPickerVal}
+            </span>
+          </div>
+        )}
+
+        {/* Avertissement neutre */}
+        <div style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"9px 12px", borderRadius:6, background:"rgba(55,53,47,0.04)", border:`1px solid rgba(55,53,47,0.08)` }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.pageSub} strokeWidth="1.8" strokeLinecap="round" style={{ flexShrink:0, marginTop:1 }}>
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span style={{ fontSize:11, color:T.pageTer, lineHeight:1.6 }}>
+            Les données de chaque année sont indépendantes. Basculer ne supprime rien.
+          </span>
+        </div>
+
+      </div>
+
+      {/* ── Footer ── */}
+      <div style={{ padding:"12px 20px 16px", borderTop:`1px solid rgba(55,53,47,0.08)`, display:"flex", gap:6, justifyContent:"flex-end" }}>
+        <button
+          onClick={() => { setShowYearPicker(false); setYearPickerVal(null); }}
+          style={{ padding:"0 14px", height:32, fontSize:12, fontFamily:"inherit", color:T.pageSub, background:"transparent", border:`1px solid rgba(55,53,47,0.15)`, borderRadius:5, cursor:"pointer" }}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(55,53,47,0.04)"}
+          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+        >
+          Annuler
+        </button>
+        <button
+          onClick={async () => {
+  const newYear = yearPickerVal;
+  const currentWsYear = ws.annee || new Date(ws.startDate).getFullYear();
+  if (!newYear || newYear === currentWsYear) { setShowYearPicker(false); return; }
+
+  // Vérifier si le workspace existe déjà
+  setSaving(true);
+  try {
+    const allWs = await apiFetch(`/workspaces`);
+    const wsData = allWs.data || allWs;
+    const clientName = (ws.company || ws.name || "").trim().toLowerCase();
+    const existing = wsData.find(w =>
+      (w.company || w.name || "").trim().toLowerCase() === clientName &&
+      (w.annee === newYear || new Date(w.startDate).getFullYear() === newYear) &&
+      w._id !== ws.id && w.id !== ws.id
+    );
+
+    if (existing) {
+      // Workspace existant → basculer directement
+      onUpdateWs(existing);
+      onSelectWs?.(existing.id || existing._id);
+      onYearChange?.(newYear);
+      setShowYearPicker(false);
+      setYearPickerVal(null);
+    } else {
+      // Workspace inexistant → demander confirmation avant création
+      setPendingYear(newYear);
+    }
+  } catch (err) {
+    alert("Erreur : " + err.message);
+  }
+  setSaving(false);
+}}
+          disabled={saving || !yearPickerVal || yearPickerVal === (ws.annee || new Date(ws.startDate).getFullYear())}
+          style={{
+            display:"flex", alignItems:"center", gap:5,
+            padding:"0 16px", height:32, fontSize:12, fontWeight:500,
+            fontFamily:"inherit", letterSpacing:"-0.01em",
+            borderRadius:5, border:"none", transition:"all 0.1s",
+            cursor: saving || !yearPickerVal || yearPickerVal === (ws.annee || new Date(ws.startDate).getFullYear()) ? "not-allowed" : "pointer",
+            background: saving || !yearPickerVal || yearPickerVal === (ws.annee || new Date(ws.startDate).getFullYear()) ? "rgba(55,53,47,0.08)" : T.accent,
+            color: saving || !yearPickerVal || yearPickerVal === (ws.annee || new Date(ws.startDate).getFullYear()) ? T.pageTer : "#fff",
+          }}
+        >
+          {saving
+            ? <Spinner size={12} color="#fff" />
+            : <Check style={{ width:11, height:11 }} />
+          }
+          {saving ? "Mise à jour…" : yearPickerVal && yearPickerVal !== (ws.annee || new Date(ws.startDate).getFullYear()) ? `Basculer vers ${yearPickerVal}` : "Basculer vers —"}
+        </button>
+      </div>
+{pendingYear && (
+  <div style={{ position:"fixed", inset:0, zIndex:600, background:"rgba(0,0,0,0.45)", display:"flex", alignItems:"center", justifyContent:"center" }}
+    onMouseDown={e => { if (e.target === e.currentTarget) setPendingYear(null); }}>
+    <div style={{ background:"#fff", borderRadius:10, boxShadow:"0 8px 32px rgba(0,0,0,0.14)", width:"min(360px,95vw)", border:`1px solid rgba(55,53,47,0.1)`, overflow:"hidden" }}>
+
+      {/* Header */}
+      <div style={{ padding:"16px 20px 14px", borderBottom:`1px solid rgba(55,53,47,0.08)`, display:"flex", alignItems:"center", gap:10 }}>
+        <div style={{ width:28, height:28, borderRadius:6, background:"#e6f1fb", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+          <CalendarRange style={{ width:13, height:13, color:"#185fa5" }} />
+        </div>
+        <span style={{ fontSize:14, fontWeight:700, color:T.pageText, letterSpacing:"-0.01em" }}>
+          Créer le plan {pendingYear} ?
+        </span>
+        <button onClick={() => setPendingYear(null)}
+          style={{ marginLeft:"auto", width:22, height:22, display:"flex", alignItems:"center", justifyContent:"center", border:"none", background:"transparent", cursor:"pointer", color:T.pageTer, borderRadius:4, padding:0 }}>
+          <X style={{ width:11, height:11 }} />
+        </button>
+      </div>
+
+      {/* Body */}
+      <div style={{ padding:"16px 20px 20px", display:"flex", flexDirection:"column", gap:12 }}>
+        <p style={{ margin:0, fontSize:13, color:T.pageText, lineHeight:1.6 }}>
+          Aucun workspace <strong>{ws.company}</strong> n'existe pour <strong>{pendingYear}</strong>.
+          Un nouveau workspace sera créé avec les mêmes paramètres que l'année en cours.
+        </p>
+        <div style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 12px", borderRadius:6, background:"rgba(55,53,47,0.04)", border:`1px solid rgba(55,53,47,0.08)` }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.pageSub} strokeWidth="1.8" strokeLinecap="round" style={{ flexShrink:0 }}>
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span style={{ fontSize:11, color:T.pageTer, lineHeight:1.5 }}>
+            Les données existantes ne seront pas affectées.
+          </span>
+        </div>
+
+        <div style={{ display:"flex", gap:7, justifyContent:"flex-end", marginTop:4 }}>
+          <button onClick={() => setPendingYear(null)}
+            style={{ padding:"0 14px", height:32, fontSize:12, fontFamily:"inherit", color:T.pageSub, background:"transparent", border:`1px solid rgba(55,53,47,0.15)`, borderRadius:5, cursor:"pointer" }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(55,53,47,0.04)"}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+            Annuler
+          </button>
+          <button
+            onClick={async () => {
+              setSaving(true);
+              try {
+                const created = await apiFetch(`/workspaces`, {
+                  method: "POST",
+                  body: {
+                    name:         ws.company || ws.name,
+                    company:      ws.company || ws.name,
+                    annee:        pendingYear,
+                    startDate:    `${pendingYear}-01-01`,
+                    endDate:      `${pendingYear}-12-31`,
+                    logoUrl:      ws.logoUrl      || "",
+                    description:  ws.description  || "",
+                    site:         ws.site         || "",
+                    couleur:      ws.couleur      || "#0f7ddb",
+                    workingDays:  ws.workingDays  || [1,2,3,4,5],
+                    skipHolidays: ws.skipHolidays ?? true,
+                  }
+                });
+                const newWs = created.data || created;
+                onUpdateWs(newWs);
+                onSelectWs?.(newWs.id || newWs._id);
+                onYearChange?.(pendingYear);
+                setPendingYear(null);
+                setShowYearPicker(false);
+                setYearPickerVal(null);
+              } catch (err) {
+                alert("Erreur lors de la création : " + err.message);
+              }
+              setSaving(false);
+            }}
+            disabled={saving}
+            style={{
+              display:"flex", alignItems:"center", gap:5,
+              padding:"0 16px", height:32, fontSize:12, fontWeight:600,
+              fontFamily:"inherit", borderRadius:5, border:"none", cursor: saving ? "not-allowed" : "pointer",
+              background: saving ? "rgba(55,53,47,0.08)" : T.accent,
+              color: saving ? T.pageTer : "#fff", transition:"all 0.1s",
+            }}>
+            {saving ? <Spinner size={12} color="#fff" /> : <Check style={{ width:11, height:11 }} />}
+            {saving ? "Création…" : `Créer le plan ${pendingYear}`}
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+)}
+    </div>
+    
+  </div>
+  
+)}
 
       {/* ══════════════════════════════════════════════════════════
           MODAL EXPORT EXCEL
@@ -1811,25 +2389,68 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
                 onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
                 style={{ ...iS, width:"100%", fontSize: isMobile ? 18 : 22, fontWeight:800, letterSpacing:"-0.02em", padding:"8px 12px", borderColor:T.accent, boxShadow:`0 0 0 2px ${T.accent}22` }} />
             </div>
-            <div style={{ flex:"1 1 130px" }}>
-              <div style={{ fontSize:11, color:T.pageTer, marginBottom:4 }}>Date de début</div>
-              <input type="date" value={editForm.startDate}
-                onChange={e => { setEditForm(p => ({ ...p, startDate: e.target.value })); if (editForm.endDate && e.target.value > editForm.endDate) setEditForm(p => ({ ...p, endDate: "" })); }}
-                style={{ ...iS, width:"100%" }} onFocus={fI} onBlur={fO} />
-            </div>
-            <div style={{ flex:"1 1 130px" }}>
-              <div style={{ fontSize:11, color:T.pageTer, marginBottom:4 }}>Date de fin</div>
-              <input type="date" value={editForm.endDate} min={editForm.startDate || undefined}
-                onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
-                style={{ ...iS, width:"100%" }} onFocus={fI} onBlur={fO} />
-            </div>
+            {/* APRÈS — mettre à la place : */}
+<div style={{ flex:"2 1 200px" }}>
+  <div style={{ fontSize:11, color:T.pageTer, marginBottom:6 }}>Année du plan</div>
+  <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+    {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 3 + i).map(y => (
+      <button key={y} onClick={() => {
+        setEditForm(p => ({
+          ...p,
+          annee:     y,
+          startDate: `${y}-01-01`,
+          endDate:   `${y}-12-31`,
+        }));
+      }}
+        style={{
+          padding:"6px 14px", fontSize:13,
+          fontWeight: y === editForm.annee ? 700 : 400,
+          color: y === editForm.annee ? "#fff" : T.pageSub,
+          background: y === editForm.annee ? T.accent : "rgba(55,53,47,0.05)",
+          border:`1px solid ${y === editForm.annee ? T.accent : "rgba(55,53,47,0.15)"}`,
+          borderRadius:4, cursor:"pointer", fontFamily:"inherit",
+        }}
+      >{y}</button>
+    ))}
+  </div>
+
+  {/* Dates personnalisables */}
+  <div style={{ display:"flex", gap:8 }}>
+    <div style={{ flex:1 }}>
+      <div style={{ fontSize:10, color:T.pageTer, marginBottom:3 }}>Date début</div>
+      <input
+        type="date"
+        value={editForm.startDate}
+        onChange={e => setEditForm(p => ({ ...p, startDate: e.target.value }))}
+        style={{ ...iS, width:"100%", fontSize:13 }}
+        onFocus={fI} onBlur={fO}
+      />
+    </div>
+    <div style={{ flex:1 }}>
+      <div style={{ fontSize:10, color:T.pageTer, marginBottom:3 }}>Date fin</div>
+      <input
+        type="date"
+        value={editForm.endDate}
+        onChange={e => setEditForm(p => ({ ...p, endDate: e.target.value }))}
+        style={{ ...iS, width:"100%", fontSize:13 }}
+        onFocus={fI} onBlur={fO}
+      />
+    </div>
+  </div>
+
+  {/* Résumé */}
+  {editForm.startDate && editForm.endDate && (
+    <div style={{ display:"flex", alignItems:"center", gap:5, marginTop:8, padding:"5px 10px", borderRadius:4, background:"rgba(55,53,47,0.04)", border:`1px solid ${T.pageBdr}`, width:"fit-content" }}>
+      <CalendarRange style={{ width:12, height:12, color:T.pageSub }}/>
+      <span style={{ fontSize:12, color:T.pageSub, fontWeight:500 }}>
+        {new Date(editForm.startDate+"T00:00:00").toLocaleDateString("fr-FR")} → {new Date(editForm.endDate+"T00:00:00").toLocaleDateString("fr-FR")}
+        {dur ? ` · ${dur} jours` : ""}
+      </span>
+    </div>
+  )}
+</div>
           </div>
-          {dur && (
-            <div style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 10px", borderRadius:4, background:"rgba(55,53,47,0.04)", border:`1px solid ${T.pageBdr}`, width:"fit-content" }}>
-              <CalendarRange style={{ width:12, height:12, color:T.pageSub }} />
-              <span style={{ fontSize:12, color:T.pageSub, fontWeight:500 }}>{dur} jour{dur > 1 ? "s" : ""}</span>
-            </div>
-          )}
+          
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
             <button onClick={saveEdit} disabled={saving || !editForm.company.trim()}
               style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 18px", fontSize:13, fontWeight:600, color:"#fff", background: saving || !editForm.company.trim() ? "#e9e9e7" : "#37352f", border:"none", borderRadius:6, cursor: saving || !editForm.company.trim() ? "not-allowed" : "pointer", fontFamily:"inherit" }}>
@@ -1880,6 +2501,20 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
               onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
               <Edit2 style={{ width:11, height:11 }} /> Modifier
             </button>
+            <button
+  onClick={() => { setYearPickerVal(ws.annee || new Date().getFullYear()); setShowYearPicker(true); }}
+  style={{
+    display:"flex", alignItems:"center", gap:5, padding:"5px 11px",
+    fontSize:12, fontWeight:500, color:"#185fa5",
+    background:"#e6f1fb", border:"1px solid #b5d4f4",
+    borderRadius:6, cursor:"pointer", fontFamily:"inherit"
+  }}
+  onMouseEnter={e => e.currentTarget.style.background = "#d4e8f7"}
+  onMouseLeave={e => e.currentTarget.style.background = "#e6f1fb"}
+>
+  <CalendarRange style={{ width:11, height:11 }} />
+  {isMobile ? "Année" : `Année ${ws.annee || new Date(ws.startDate).getFullYear()}`}
+</button>
             {ws.hasExportBase && (
               <button onClick={openExport}
                 style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 11px", fontSize:12, fontWeight:500, color:"#3b6d11", background:"#eaf3de", border:"1px solid #c0dd97", borderRadius:6, cursor:"pointer", fontFamily:"inherit" }}
@@ -1910,10 +2545,29 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
           if (!t.start || !t.end) return s;
           return s + calcWD(t.start, t.end, [6,0], true, []);
         }, 0);
-        const totalCout = candidats.reduce((s, c) => {
-          const v = parseFloat(String(c.cout||"0").replace(/\s/g,"").replace(",",".")) || 0;
-          return s + v;
-        }, 0);
+        const totalCout = (() => {
+  const stats = {};
+  candidats.forEach(c => {
+    const theme = (c.theme || "").trim();
+    const key = theme;
+    if (!stats[key]) {
+      stats[key] = {
+        groupesSet: new Set(),
+        coutUnitaire: parseFloat(
+          String(c.extraData?.cout || c.cout || "0")
+            .replace(/\s/g, "")
+            .replace(",", ".")
+        ) || 0,
+        jours: parseFloat(c.jours) || 0,
+      };
+    }
+    stats[key].groupesSet.add(c.groupe);
+  });
+
+  return Object.values(stats).reduce((sum, s) => {
+    return sum + s.coutUnitaire * s.jours * s.groupesSet.size;
+  }, 0);
+})();
         const uniqueThemes  = [...new Set(tasks.map(t => t.group).filter(Boolean))];
         const uniqueGroupes = tasks.length;
         const now = new Date(); now.setHours(0,0,0,0);
@@ -2029,11 +2683,11 @@ function Overview({ ws, tasks, candidats, documents, onSection, loading, onDelet
                 <div style={panelTitle}>Coût global du plan de formation</div>
                 <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:14 }}>
                   <span style={{ fontSize: isMobile ? 24 : 32, fontWeight:800, color:T.pageText, letterSpacing:"-0.04em" }}>
-                    {totalCout.toLocaleString("fr-FR")}
-                  </span>
+  {totalCout.toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+</span>
                   <span style={{ fontSize:14, color:T.pageSub }}>MAD</span>
                 </div>
-                <div style={{ display:"grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,minmax(0,1fr))", gap:12, paddingTop:12, borderTop:`1px solid ${T.pageBdr}` }}>
+                <div style={{ display:"none", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,minmax(0,1fr))", gap:12, paddingTop:12, borderTop:`1px solid ${T.pageBdr}` }}>
                   {[
                     { label:"Coût moyen / candidat", value:`${avgPerCand.toLocaleString("fr-FR")} MAD` },
                     { label:"Coût moyen / jour",      value:`${avgPerDay.toLocaleString("fr-FR")} MAD` },
@@ -4524,15 +5178,220 @@ function CModal({ item, onClose, onSave }) {
   );
 }
 
-function MultiBaseImportWizard({ onClose, onDone, setTasks, wsStart, wsEnd, wsId, showToast, setDocuments,wsWorkingDays, wsSkipHolidays, wsVacances, onUpdateWs }) {
-const [conflictDetail, setConflictDetail] = useState(null); 
-  const [showConfirm, setShowConfirm] = useState(false); // <--- AJOUTEZ CETTE LIGNE
-   const { wd, setWd, sh, setSh, vacs, setVacs } = usePlanningSettings(
-    wsId, wsWorkingDays, wsSkipHolidays, wsVacances, onUpdateWs
+// ═══════════════════════════════════════════════════════════════
+// BasePanel — DÉFINI EN DEHORS de MultiBaseImportWizard
+// ═══════════════════════════════════════════════════════════════
+const BasePanel = memo(function BasePanel({ 
+  base, setter, fields, fileRef, color, iS, fI, fO, thS, tdS, T, readExcelFile
+}) {
+  const tableScrollRef = useRef(null);
+  const scrollPosRef   = useRef(0);
+
+  useEffect(() => {
+    if (tableScrollRef.current) {
+      tableScrollRef.current.scrollLeft = scrollPosRef.current;
+    }
+  });
+
+  const headers = base.rows[0] || [];
+  const preview = base.rows.slice(1, 5);
+  const mapping = base.mapping;
+  const hasId   = fields.some(f => f.key === "nomprenom")
+    ? (mapping["nomprenom"] >= 0 || (mapping["nom"] >= 0 && mapping["prenom"] >= 0))
+    : true;
+  const canMap  = fields.filter(f => f.required).every(f => mapping[f.key] >= 0) && hasId;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+      {/* ── Zone de dépôt ── */}
+      <div
+        onDragOver={e => { e.preventDefault(); setter(p => ({ ...p, dragOver: true })); }}
+        onDragLeave={() => setter(p => ({ ...p, dragOver: false }))}
+        onDrop={e => {
+          e.preventDefault();
+          setter(p => ({ ...p, dragOver: false }));
+          readExcelFile(e.dataTransfer.files[0], setter);
+        }}
+        onClick={() => fileRef.current?.click()}
+        style={{
+          border: `2px dashed ${base.dragOver ? color : "rgba(55,53,47,0.15)"}`,
+          borderRadius: 7, padding: "20px 16px",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+          cursor: "pointer",
+          background: base.dragOver ? `${color}06` : "rgba(55,53,47,0.01)",
+          transition: "all 0.12s", minHeight: 90,
+        }}
+      >
+        <FileUp style={{ width: 18, height: 18, color: base.fileName ? color : T.pageTer }} />
+        {base.fileName ? (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: T.pageText }}>{base.fileName}</div>
+            <div style={{ fontSize: 11, color: T.pageSub }}>{base.rows.length - 1} lignes · Cliquer pour remplacer</div>
+          </div>
+        ) : (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 13, color: T.pageText }}>
+              Glisser-déposer ou <span style={{ color: T.accent, fontWeight: 600 }}>parcourir</span>
+            </div>
+            <div style={{ fontSize: 11, color: T.pageTer, marginTop: 2 }}>.xlsx · .xls · .csv · .ods</div>
+          </div>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls,.csv,.ods"
+          style={{ display: "none" }}
+          onChange={e => {
+            readExcelFile(e.target.files?.[0], setter);
+            e.target.value = "";
+          }}
+        />
+      </div>
+
+      {/* ── Erreur fichier ── */}
+      {base.fileError && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 12px", borderRadius: 4,
+          background: "rgba(212,76,71,0.05)", border: "1px solid rgba(212,76,71,0.2)",
+          color: "#d44c47", fontSize: 12,
+        }}>
+          <AlertTriangle style={{ width: 12, height: 12, flexShrink: 0 }} />
+          {base.fileError}
+        </div>
+      )}
+
+      {/* ── Tableau mapping ── */}
+      {base.rows.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Associer les colonnes
+          </div>
+
+          <div
+            ref={tableScrollRef}
+            onScroll={e => { scrollPosRef.current = e.currentTarget.scrollLeft; }}
+            style={{ overflowX: "auto", border: `1px solid ${T.pageBdr}`, borderRadius: 6 }}
+          >
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 300 }}>
+              <thead>
+                <tr style={{ background: "rgba(55,53,47,0.02)" }}>
+                  {headers.map((h, ci) => (
+                    <th key={ci} style={{ ...thS, minWidth: 110 }}>
+                      <select
+                        value={Object.entries(mapping).find(([, v]) => v === ci)?.[0] || ""}
+                        onChange={e => {
+                          const field = e.target.value;
+                          setter(p => {
+                            const next = { ...p.mapping };
+                            Object.keys(next).forEach(k => { if (next[k] === ci) next[k] = -1; });
+                            if (field) {
+                              Object.keys(next).forEach(k => { if (k === field) next[k] = -1; });
+                              next[field] = ci;
+                            }
+                            return { ...p, mapping: next };
+                          });
+                        }}
+                        style={{ ...iS, width: "100%", fontSize: 11 }}
+                      >
+                        <option value="">— Ignorer —</option>
+                        {fields.map(f => (
+                          <option key={f.key} value={f.key} disabled={mapping[f.key] >= 0 && mapping[f.key] !== ci}>
+                            {f.label}
+                          </option>
+                        ))}
+                      </select>
+                    </th>
+                  ))}
+                </tr>
+                <tr>
+                  {headers.map((h, ci) => (
+                    <th key={ci} style={{
+                      ...thS, color: T.pageText, fontWeight: 600, fontSize: 11,
+                      background: Object.values(mapping).includes(ci) ? `${color}08` : undefined,
+                    }}>
+                      {h || `Col ${ci + 1}`}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {preview.map((row, ri) => (
+                  <tr key={ri}>
+                    {row.map((cell, ci) => (
+                      <td key={ci} style={{
+                        ...tdS,
+                        background: Object.values(mapping).includes(ci) ? `${color}06` : undefined,
+                        maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis",
+                        whiteSpace: "nowrap", fontSize: 11,
+                      }} title={cell}>
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ── Pills statut des champs ── */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+            {fields.map(f => {
+              if (f.key === "nom" || f.key === "prenom") return null;
+              if (f.key === "nomprenom" && fields.some(ff => ff.key === "nom")) {
+                const ok = mapping["nomprenom"] >= 0 || (mapping["nom"] >= 0 && mapping["prenom"] >= 0);
+                return (
+                  <span key="ident" style={{
+                    display: "inline-flex", alignItems: "center", gap: 4,
+                    padding: "2px 8px", borderRadius: 3, fontSize: 11,
+                    border: `1px solid ${ok ? "rgba(68,131,97,0.3)" : T.pageBdr}`,
+                    background: ok ? "rgba(68,131,97,0.07)" : "transparent",
+                    color: ok ? "#448361" : T.pageSub,
+                  }}>
+                    {ok ? <Check style={{ width: 9, height: 9 }} /> : <div style={{ width: 9, height: 9, borderRadius: "50%", border: `1.5px solid ${T.pageTer}` }} />}
+                    Identité
+                  </span>
+                );
+              }
+              const ok = mapping[f.key] >= 0;
+              return (
+                <span key={f.key} style={{
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  padding: "2px 8px", borderRadius: 3, fontSize: 11,
+                  border: `1px solid ${ok ? "rgba(68,131,97,0.3)" : f.required ? "rgba(212,76,71,0.3)" : T.pageBdr}`,
+                  background: ok ? "rgba(68,131,97,0.07)" : f.required ? "rgba(212,76,71,0.04)" : "transparent",
+                  color: ok ? "#448361" : f.required ? "#d44c47" : T.pageSub,
+                }}>
+                  {ok ? <Check style={{ width: 9, height: 9 }} /> : <div style={{ width: 9, height: 9, borderRadius: "50%", border: `1.5px solid ${f.required ? "#d44c47" : T.pageTer}` }} />}
+                  {(f.label || f.key).replace(" ★", "")}{f.required ? " ★" : ""}
+                </span>
+              );
+            })}
+          </div>
+
+          {canMap && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#448361" }}>
+              <CheckCircle2 style={{ width: 12, height: 12 }} />
+              Mapping complet — prêt à vérifier
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// MultiBaseImportWizard
+// ═══════════════════════════════════════════════════════════════
+function MultiBaseImportWizard({ onClose, onDone, setTasks, wsStart, wsEnd, wsId, showToast, setDocuments, wsWorkingDays, wsSkipHolidays, wsVacances, onUpdateWs }) {
+  const [conflictDetail, setConflictDetail] = useState(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const { wd, setWd, sh, setSh, vacs, setVacs } = usePlanningSettings(wsId, wsWorkingDays, wsSkipHolidays, wsVacances, onUpdateWs);
   const [vacForm, setVacForm] = useState({ label: "", start: "", end: "" });
   const [showSettings, setShowSettings] = useState(true);
-
   const [step, setStep] = useState(1);
   const [durationUnit, setDurationUnit] = useState("heures");
 
@@ -4554,197 +5413,122 @@ const [conflictDetail, setConflictDetail] = useState(null);
   const [ganttDone, setGanttDone] = useState(false);
   const [importing, setImporting] = useState(false);
 
-  // ── Conflits ────────────────────────────────────────────────────
   const [liveConflicts, setLiveConflicts] = useState({});
   const conflictTimerRef = useRef(null);
 
-  // ── Colonnes visibles — TOUTES CACHÉES par défaut sauf les 7 de base ──
   const [visibleCols, setVisibleCols] = useState({
-    theme:         true,
-    groupe:        true,
-    count:         true,
-    duree:         true,
-    start:         true,
-    end:           true,
-    statut:        true,
-    domaine:       false,
-    typeFormation: false,
-    niveau:        false,
-    publicCible:   false,
-    objectif:      false,
-    contenu:       false,
-    cabinet:       false,
-    formateur:     false,
-    lieu:          false,
-    cout:          false,
-    cnss:          false,
-    departement:   false,
-    csp:           false,
+    theme: true, groupe: true, count: true, duree: true, start: true, end: true, statut: true,
+    domaine: false, typeFormation: false, niveau: false, publicCible: false,
+    objectif: false, contenu: false, cabinet: false, formateur: false,
+    lieu: false, cout: false, cnss: false, departement: false, csp: false,
   });
   const [showColPicker, setShowColPicker] = useState(false);
-
-  // ── Filtres par colonne ──────────────────────────────────────────
   const [colFilters, setColFilters] = useState({});
-  const [conflictEdit, setConflictEdit] = useState({}); 
-
-
-  // ── Tri ──────────────────────────────────────────────────────────
+  const [conflictEdit, setConflictEdit] = useState({});
   const [sortField, setSortField] = useState("theme");
-  const [sortDir,   setSortDir]   = useState("asc");
+  const [sortDir, setSortDir] = useState("asc");
 
-  // ── Définition des colonnes ─────────────────────────────────────
   const COL_DEFS = [
-    { key: "theme",         label: "Formation",       sortable: true,  filterable: true,  group: "Base" },
-    { key: "groupe",        label: "Groupe",          sortable: true,  filterable: false, group: "Base" },
-    { key: "count",         label: "Candidats",       sortable: true,  filterable: false, group: "Base" },
-    { key: "duree",         label: "Durée / Séance",  sortable: true,  filterable: false, group: "Base" },
-    { key: "start",         label: "Début",           sortable: true,  filterable: false, group: "Base" },
-    { key: "end",           label: "Fin",             sortable: true,  filterable: false, group: "Base" },
-    { key: "statut",        label: "Statut",          sortable: true,  filterable: true,  group: "Base" },
-    { key: "domaine",       label: "Domaine",         sortable: true,  filterable: true,  group: "Formation" },
-    { key: "typeFormation", label: "Type formation",  sortable: true,  filterable: true,  group: "Formation" },
-    { key: "niveau",        label: "Niveau",          sortable: true,  filterable: true,  group: "Formation" },
-    { key: "publicCible",   label: "Public cible",    sortable: true,  filterable: true,  group: "Formation" },
-    { key: "objectif",      label: "Objectif",        sortable: false, filterable: true,  group: "Formation" },
-    { key: "contenu",       label: "Contenu",         sortable: false, filterable: true,  group: "Formation" },
-    { key: "cabinet",       label: "Cabinet",         sortable: true,  filterable: true,  group: "Cabinet" },
-    { key: "formateur",     label: "Formateur",       sortable: true,  filterable: true,  group: "Cabinet" },
-    { key: "lieu",          label: "Lieu",            sortable: true,  filterable: true,  group: "Cabinet" },
-    { key: "cout",          label: "Coût",            sortable: true,  filterable: false, group: "Cabinet" },
-    { key: "cnss",          label: "N° CNSS",         sortable: false, filterable: true,  group: "Cabinet" },
-    { key: "departement",   label: "Département",     sortable: true,  filterable: true,  group: "Personnel" },
-    { key: "csp",           label: "CSP",             sortable: true,  filterable: true,  group: "Personnel" },
+    { key: "theme",         label: "Formation",      sortable: true,  filterable: true,  group: "Base" },
+    { key: "groupe",        label: "Groupe",         sortable: true,  filterable: false, group: "Base" },
+    { key: "count",         label: "Candidats",      sortable: true,  filterable: false, group: "Base" },
+    { key: "duree",         label: "Durée / Séance", sortable: true,  filterable: false, group: "Base" },
+    { key: "start",         label: "Début",          sortable: true,  filterable: false, group: "Base" },
+    { key: "end",           label: "Fin",            sortable: true,  filterable: false, group: "Base" },
+    { key: "statut",        label: "Statut",         sortable: true,  filterable: true,  group: "Base" },
+    { key: "domaine",       label: "Domaine",        sortable: true,  filterable: true,  group: "Formation" },
+    { key: "typeFormation", label: "Type formation", sortable: true,  filterable: true,  group: "Formation" },
+    { key: "niveau",        label: "Niveau",         sortable: true,  filterable: true,  group: "Formation" },
+    { key: "publicCible",   label: "Public cible",   sortable: true,  filterable: true,  group: "Formation" },
+    { key: "objectif",      label: "Objectif",       sortable: false, filterable: true,  group: "Formation" },
+    { key: "contenu",       label: "Contenu",        sortable: false, filterable: true,  group: "Formation" },
+    { key: "cabinet",       label: "Cabinet",        sortable: true,  filterable: true,  group: "Cabinet" },
+    { key: "formateur",     label: "Formateur",      sortable: true,  filterable: true,  group: "Cabinet" },
+    { key: "lieu",          label: "Lieu",           sortable: true,  filterable: true,  group: "Cabinet" },
+    { key: "cout",          label: "Coût",           sortable: true,  filterable: false, group: "Cabinet" },
+    { key: "cnss",          label: "N° CNSS",        sortable: false, filterable: true,  group: "Cabinet" },
+    { key: "departement",   label: "Département",    sortable: true,  filterable: true,  group: "Personnel" },
+    { key: "csp",           label: "CSP",            sortable: true,  filterable: true,  group: "Personnel" },
   ];
   const COL_GROUPS = ["Base", "Formation", "Cabinet", "Personnel"];
 
-  // ── conflictIndex ────────────────────────────────────────────────
   const conflictIndex = useMemo(() => {
     const idx = {};
     Object.entries(liveConflicts).forEach(([key, types]) => { idx[key] = types; });
     return idx;
   }, [liveConflicts]);
 
-  // ── useEffect conflits (VERSION CORRIGÉE) ───────────────────────────
-useEffect(() => {
-  if (!result.length) { setLiveConflicts({}); return; }
-  if (conflictTimerRef.current) clearTimeout(conflictTimerRef.current);
-  
-  conflictTimerRef.current = setTimeout(() => {
-    const run = () => {
-      // 1. Détection des conflits de candidats (le même nom/matricule)
-      const allCandidateConflicts = detectScheduleConflictsV3(result, wd, sh, vacs);
-
-      // 2. Indexation de TOUS les groupes par lieu pour la capacité
-      const lieuIndex = {};
-      const groupLieuKey = {};
-      const lieuCapacity = {};
-
-      result.forEach(r => {
-        const gKey = `${r.theme.trim()}||${r.groupe}`;
-        // On normalise le nom du lieu (trim et minuscule) pour éviter les erreurs de frappe
-        const rawLieu = [r.lieu, r.cabinet].filter(Boolean).join("||") || "default";
-        const lieuKey = rawLieu.trim().toLowerCase(); 
-        
-        groupLieuKey[gKey] = lieuKey;
-        lieuCapacity[lieuKey] = Math.max(lieuCapacity[lieuKey] || 1, Number(r.nbrEspace) || 1);
-
-        if (!lieuIndex[lieuKey]) lieuIndex[lieuKey] = [];
-        if (!lieuIndex[lieuKey].find(x => x.key === gKey)) {
-          lieuIndex[lieuKey].push({
-            key: gKey,
-            start: r.start || "",
-            end: r.end || "",
-            halfDay: r.halfDay || false,
-            slot: r.slot || null,
-          });
-        }
-      });
-
-      // 3. Fonction de calcul des occupations simultanées
-      const getSimultaneousCount = (targetGKey, lieuKey) => {
-        const peers = lieuIndex[lieuKey] || [];
-        const me = peers.find(x => x.key === targetGKey);
-        if (!me || !me.start) return 0;
-
-        return peers.filter(p => {
-          if (p.key === targetGKey || !p.start) return false;
-          // Vérification du chevauchement de dates
-          const overlap = p.start <= me.end && p.end >= me.start;
-          if (!overlap) return false;
-          // Si c'est une demi-journée, on ne compte que si c'est le même créneau (AM/PM)
-          if (me.halfDay && p.halfDay) return me.slot === p.slot;
-          return true;
-        }).length + 1; // +1 pour s'inclure soi-même
-      };
-
-      const idx = {};
-
-      // A. AJOUT DES CONFLITS DE SALLE PLEINE (Indépendant des candidats)
-      Object.keys(groupLieuKey).forEach(gKey => {
-        const lKey = groupLieuKey[gKey];
-        const cap = lieuCapacity[lKey];
-        const count = getSimultaneousCount(gKey, lKey);
-
-        if (count > cap) {
-          if (!idx[gKey]) idx[gKey] = new Set();
-          idx[gKey].add("salle_pleine");
-        }
-      });
-
-      // B. AJOUT DES AUTRES CONFLITS (Fériés, Congés, etc.) issus de detectScheduleConflictsV3
-      allCandidateConflicts.forEach(cf => {
-        cf.conflicts.forEach(c => {
-          const key = `${c.theme}||${c.groupe}`;
-          if (!idx[key]) idx[key] = new Set();
-          
-          // On n'ajoute pas 'overlap' ici car il est déjà couvert par 'salle_pleine' 
-          // ou 'candidat_double' (géré par candidatConflictKeys)
-          if (c.type !== "overlap") {
-            idx[key].add(c.type);
+  useEffect(() => {
+    if (!result.length) { setLiveConflicts({}); return; }
+    if (conflictTimerRef.current) clearTimeout(conflictTimerRef.current);
+    conflictTimerRef.current = setTimeout(() => {
+      const run = () => {
+        const allCandidateConflicts = detectScheduleConflictsV3(result, wd, sh, vacs);
+        const lieuIndex = {}, groupLieuKey = {}, lieuCapacity = {};
+        result.forEach(r => {
+          const gKey = `${r.theme.trim()}||${r.groupe}`;
+          const rawLieu = [r.lieu, r.cabinet].filter(Boolean).join("||") || "default";
+          const lieuKey = rawLieu.trim().toLowerCase();
+          groupLieuKey[gKey] = lieuKey;
+          lieuCapacity[lieuKey] = Math.max(lieuCapacity[lieuKey] || 1, Number(r.nbrEspace) || 1);
+          if (!lieuIndex[lieuKey]) lieuIndex[lieuKey] = [];
+          if (!lieuIndex[lieuKey].find(x => x.key === gKey)) {
+            lieuIndex[lieuKey].push({ key: gKey, start: r.start || "", end: r.end || "", halfDay: r.halfDay || false, slot: r.slot || null });
           }
         });
-      });
+        const getSimultaneousCount = (targetGKey, lieuKey) => {
+          const peers = lieuIndex[lieuKey] || [];
+          const me = peers.find(x => x.key === targetGKey);
+          if (!me || !me.start) return 0;
+          return peers.filter(p => {
+            if (p.key === targetGKey || !p.start) return false;
+            const overlap = p.start <= me.end && p.end >= me.start;
+            if (!overlap) return false;
+            if (me.halfDay && p.halfDay) return me.slot === p.slot;
+            return true;
+          }).length + 1;
+        };
+        const idx = {};
+        Object.keys(groupLieuKey).forEach(gKey => {
+          const lKey = groupLieuKey[gKey];
+          const cap = lieuCapacity[lKey];
+          const count = getSimultaneousCount(gKey, lKey);
+          if (count > cap) { if (!idx[gKey]) idx[gKey] = new Set(); idx[gKey].add("salle_pleine"); }
+        });
+        allCandidateConflicts.forEach(cf => {
+          cf.conflicts.forEach(c => {
+            const key = `${c.theme}||${c.groupe}`;
+            if (!idx[key]) idx[key] = new Set();
+            if (c.type !== "overlap") idx[key].add(c.type);
+          });
+        });
+        setLiveConflicts(idx);
+      };
+      if (typeof requestIdleCallback !== "undefined") requestIdleCallback(run, { timeout: 800 });
+      else run();
+    }, 400);
+    return () => { if (conflictTimerRef.current) clearTimeout(conflictTimerRef.current); };
+  }, [result, wd, sh, vacs, wsStart, wsEnd]);
 
-      setLiveConflicts(idx);
-    };
+  const batchId       = useRef(uid());
+  const fileRef1      = useRef(null);
+  const fileRef2      = useRef(null);
+  const fileRef3      = useRef(null);
+  const batchTasksRef = useRef([]);
 
-    if (typeof requestIdleCallback !== "undefined") {
-      requestIdleCallback(run, { timeout: 800 });
-    } else {
-      run();
-    }
-  }, 400);
-  
-  return () => { if (conflictTimerRef.current) clearTimeout(conflictTimerRef.current); };
-}, [result, wd, sh, vacs, wsStart, wsEnd]);
-
-  const batchId        = useRef(uid());
-  const fileRef1       = useRef(null);
-  const fileRef2       = useRef(null);
-  const fileRef3       = useRef(null);
-  const batchTasksRef  = useRef([]);
-
-  // ── groupRows ────────────────────────────────────────────────────
   const groupRows = useMemo(() => {
     const seen = new Map();
     result.forEach(r => {
       const key = `${r.theme.trim()}||${r.groupe}`;
       if (!seen.has(key)) {
         seen.set(key, {
-  key,
-  theme:       r.theme.trim(),
-  groupe:      r.groupe,
-  start:       r.start   || "",
-  end:         r.end     || "",
-  jours:       r.jours   || 1,
-  halfDay:     r.halfDay || false,
-  slot:        r.slot    || null,
-  nbrEspace:   r.nbrEspace || 1,
-  lieu:        r.lieu    || "",
-  cabinet:     r.cabinet || "",
-  hasPreDates: r.hasPreDates || false,  // ← AJOUTER
-  count:       0,
-});
+          key, theme: r.theme.trim(), groupe: r.groupe,
+          start: r.start || "", end: r.end || "",
+          jours: r.jours || 1, halfDay: r.halfDay || false,
+          slot: r.slot || null, nbrEspace: r.nbrEspace || 1,
+          lieu: r.lieu || "", cabinet: r.cabinet || "",
+          hasPreDates: r.hasPreDates || false, count: 0,
+        });
       }
       seen.get(key).count++;
     });
@@ -4753,253 +5537,135 @@ useEffect(() => {
     );
   }, [result]);
 
-  // ── halfDayConflictKeys ──────────────────────────────────────────
   const halfDayConflictKeys = useMemo(() => {
     const bad = new Set();
     const byDate = {};
     groupRows.forEach(gr => {
       if (!gr.halfDay || !gr.start) return;
       const slot = gr.slot || "matin";
-      const dk   = `${gr.start}||${slot}`;
+      const dk = `${gr.start}||${slot}`;
       if (!byDate[dk]) byDate[dk] = [];
       byDate[dk].push(gr.key);
     });
-    Object.values(byDate).forEach(keys => {
-      if (keys.length > 1) keys.forEach(k => bad.add(k));
-    });
+    Object.values(byDate).forEach(keys => { if (keys.length > 1) keys.forEach(k => bad.add(k)); });
     return bad;
   }, [groupRows]);
 
-  // ── candidatConflictKeys ─────────────────────────────────────────
   const candidatConflictKeys = useMemo(() => {
     const bad = new Set();
     const byCandidat = {};
     result.forEach(r => {
       if (!r.start) return;
       const mat = (r.matricule || "").trim().toLowerCase();
-      const vM  = mat.length > 3 && mat !== "en cours de recrutement";
-      const cId = vM
-        ? `mat:${mat}`
-        : `np:${r.nom.toLowerCase()}__${r.prenom.toLowerCase()}`;
+      const vM = mat.length > 3 && mat !== "en cours de recrutement";
+      const cId = vM ? `mat:${mat}` : `np:${r.nom.toLowerCase()}__${r.prenom.toLowerCase()}`;
       if (!byCandidat[cId]) byCandidat[cId] = [];
-      byCandidat[cId].push({
-        gKey:    `${r.theme.trim()}||${r.groupe}`,
-        theme:   r.theme.trim(),
-        start:   r.start,
-        end:     r.end || r.start,
-        halfDay: r.halfDay || false,
-        slot:    r.slot || null,
-      });
+      byCandidat[cId].push({ gKey: `${r.theme.trim()}||${r.groupe}`, theme: r.theme.trim(), start: r.start, end: r.end || r.start, halfDay: r.halfDay || false, slot: r.slot || null });
     });
     Object.values(byCandidat).forEach(sessions => {
       if (sessions.length < 2) return;
       for (let i = 0; i < sessions.length; i++) {
         for (let j = i + 1; j < sessions.length; j++) {
-          const a = sessions[i];
-          const b = sessions[j];
+          const a = sessions[i], b = sessions[j];
           if (a.gKey === b.gKey) continue;
           const overlap = a.start <= b.end && b.start <= a.end;
           if (!overlap) continue;
           if (a.halfDay && b.halfDay && a.slot !== b.slot) continue;
-          bad.add(a.gKey);
-          bad.add(b.gKey);
+          bad.add(a.gKey); bad.add(b.gKey);
         }
       }
     });
     return bad;
   }, [result]);
 
-  // ── conflictCount ────────────────────────────────────────────────
   const conflictCount = useMemo(() => {
-    const keys = new Set([
-      ...Object.keys(liveConflicts),
-      ...halfDayConflictKeys,
-      ...candidatConflictKeys,
-    ]);
+    const keys = new Set([...Object.keys(liveConflicts), ...halfDayConflictKeys, ...candidatConflictKeys]);
     return keys.size;
   }, [liveConflicts, halfDayConflictKeys, candidatConflictKeys]);
 
   const getConflictDetail = useCallback((gr) => {
-  const key = gr.key;
-  const cf  = conflictIndex[key];
-
-  // ── PRIORITÉ 1 : HORS PÉRIODE ────────────────────────────
-  const wsE = wsEnd || (wsStart ? `${wsStart.slice(0,4)}-12-31` : null);
-  if (wsE && gr.end && gr.end > wsE) {
-    return {
-      key, type: "hors_periode",
-      title: "Groupe hors de la période du workspace",
-      color: "#d44c47",
-      items: [{
-        conflictWith: `Fin workspace : ${fmt(wsE)}`,
-        periode:      `Fin groupe : ${fmt(gr.end)}`,
-        periodeOther: `Dépassement : ${gdb(pd(wsE), pd(gr.end))} jour(s)`,
-      }],
-    };
-  }
-
-  // ── PRIORITÉ 2 : DEMI-JOURNÉE ────────────────────────────
-  if (halfDayConflictKeys.has(key)) {
-    const slot  = gr.slot || "matin";
-    const peers = groupRows.filter(g =>
-      g.key !== key && g.halfDay && g.start === gr.start && (g.slot || "matin") === slot
-    );
-    return {
-      key, type: "halfday",
-      title: `Créneau ${slot === "matin" ? "matin" : "après-midi"} déjà occupé le ${fmt(gr.start)}`,
-      color: "#d44c47",
-      items: peers.map(p => ({
-        conflictWith: `${p.theme} — G${p.groupe}`,
-        periode:      fmt(gr.start),
-        periodeOther: `Même créneau : ${slot === "matin" ? "Matin" : "Après-midi"}`,
-      })),
-    };
-  }
-
-  // ── PRIORITÉ 3 : SALLE PLEINE ────────────────────────────
-  if (cf?.has("salle_pleine")) {
-    const lieuKey = [gr.lieu, gr.cabinet].filter(Boolean).join("||") || "default";
-    const peers   = groupRows.filter(g => {
-      if (g.key === key || !g.start) return false;
-      const pLieuKey = [g.lieu, g.cabinet].filter(Boolean).join("||") || "default";
-      if (pLieuKey !== lieuKey) return false;
-      const overlap = g.start <= gr.end && gr.start <= g.end;
-      if (!overlap) return false;
-      if (gr.halfDay && g.halfDay) return gr.slot === g.slot;
-      return true;
-    });
-    return {
-      key, type: "salle_pleine",
-      title: `Salle pleine — ${gr.lieu || gr.cabinet || "lieu non défini"} (capacité : ${gr.nbrEspace})`,
-      color: "#d44c47",
-      items: peers.map(p => ({
-        conflictWith: `${p.theme} — G${p.groupe}`,
-        periode:      `${fmt(gr.start)}${gr.end !== gr.start ? ` → ${fmt(gr.end)}` : ""}`,
-        periodeOther: `${fmt(p.start)}${p.end !== p.start ? ` → ${fmt(p.end)}` : ""}`,
-        lieu:         gr.lieu || gr.cabinet || "même lieu",
-        capacite:     gr.nbrEspace,
-        simultanes:   peers.length + 1,
-      })),
-    };
-  }
-
-  // ── PRIORITÉ 4 : CHEVAUCHEMENT ───────────────────────────
-  if (cf?.has("overlap")) {
-    const lieuKey = [gr.lieu, gr.cabinet].filter(Boolean).join("||") || "default";
-    const peers   = groupRows.filter(g => {
-      if (g.key === key || !g.start) return false;
-      const pLieuKey = [g.lieu, g.cabinet].filter(Boolean).join("||") || "default";
-      if (pLieuKey !== lieuKey) return false;
-      const overlap = g.start <= gr.end && gr.start <= g.end;
-      if (!overlap) return false;
-      if (gr.halfDay && g.halfDay) return gr.slot === g.slot;
-      return true;
-    });
-    return {
-      key, type: "overlap",
-      title: `Chevauchement de planning — ${gr.lieu || gr.cabinet || "lieu non défini"}`,
-      color: "#d44c47",
-      items: peers.map(p => ({
-        conflictWith: `${p.theme} — G${p.groupe}`,
-        periode:      `${fmt(gr.start)}${gr.end !== gr.start ? ` → ${fmt(gr.end)}` : ""}`,
-        periodeOther: `${fmt(p.start)}${p.end !== p.start ? ` → ${fmt(p.end)}` : ""}`,
-        lieu:         gr.lieu || gr.cabinet || "même lieu",
-        capacite:     gr.nbrEspace,
-        simultanes:   peers.length + 1,
-      })),
-    };
-  }
-
-  // ── PRIORITÉ 5 : CANDIDAT DOUBLE ─────────────────────────
-  if (candidatConflictKeys.has(key)) {
-    const details = [];
-    const byCandidat = {};
-    result.forEach(r => {
-      if (!r.start) return;
-      const mat = (r.matricule || "").trim().toLowerCase();
-      const vM  = mat.length > 3 && mat !== "en cours de recrutement";
-      const cId = vM
-        ? `mat:${mat}`
-        : `np:${r.nom.toLowerCase()}__${r.prenom.toLowerCase()}`;
-      if (!byCandidat[cId]) byCandidat[cId] = [];
-      byCandidat[cId].push({
-        gKey:      `${r.theme.trim()}||${r.groupe}`,
-        theme:     r.theme.trim(),
-        groupe:    r.groupe,
-        start:     r.start,
-        end:       r.end || r.start,
-        halfDay:   r.halfDay || false,
-        slot:      r.slot || null,
-        nom:       r.nom,
-        prenom:    r.prenom,
-        matricule: r.matricule || "",
+    const key = gr.key;
+    const cf = conflictIndex[key];
+    const wsE = wsEnd || (wsStart ? `${wsStart.slice(0, 4)}-12-31` : null);
+    if (wsE && gr.end && gr.end > wsE) {
+      return { key, type: "hors_periode", title: "Groupe hors de la période du workspace", color: "#d44c47", items: [{ conflictWith: `Fin workspace : ${fmt(wsE)}`, periode: `Fin groupe : ${fmt(gr.end)}`, periodeOther: `Dépassement : ${gdb(pd(wsE), pd(gr.end))} jour(s)` }] };
+    }
+    if (halfDayConflictKeys.has(key)) {
+      const slot = gr.slot || "matin";
+      const peers = groupRows.filter(g => g.key !== key && g.halfDay && g.start === gr.start && (g.slot || "matin") === slot);
+      return { key, type: "halfday", title: `Créneau ${slot === "matin" ? "matin" : "après-midi"} déjà occupé le ${fmt(gr.start)}`, color: "#d44c47", items: peers.map(p => ({ conflictWith: `${p.theme} — G${p.groupe}`, periode: fmt(gr.start), periodeOther: `Même créneau : ${slot === "matin" ? "Matin" : "Après-midi"}` })) };
+    }
+    if (cf?.has("salle_pleine")) {
+      const lieuKey = [gr.lieu, gr.cabinet].filter(Boolean).join("||") || "default";
+      const peers = groupRows.filter(g => {
+        if (g.key === key || !g.start) return false;
+        const pLieuKey = [g.lieu, g.cabinet].filter(Boolean).join("||") || "default";
+        if (pLieuKey !== lieuKey) return false;
+        const overlap = g.start <= gr.end && gr.start <= g.end;
+        if (!overlap) return false;
+        if (gr.halfDay && g.halfDay) return gr.slot === g.slot;
+        return true;
       });
-    });
-
-    Object.values(byCandidat).forEach(sessions => {
-      if (sessions.length < 2) return;
-      for (let i = 0; i < sessions.length; i++) {
-        for (let j = i + 1; j < sessions.length; j++) {
-          const a = sessions[i];
-          const b = sessions[j];
-          if (a.gKey === b.gKey) continue;
-          if (a.gKey !== key && b.gKey !== key) continue;
-          const overlap = a.start <= b.end && b.start <= a.end;
-          if (!overlap) continue;
-          if (a.halfDay && b.halfDay && a.slot !== b.slot) continue;
-          const other = a.gKey === key ? b : a;
-          details.push({
-            candidat:     `${a.nom} ${a.prenom}${a.matricule ? ` (${a.matricule})` : ""}`,
-            conflictWith: `${other.theme} — G${other.groupe}`,
-            periode:      `${fmt(a.start)}${a.end !== a.start ? ` → ${fmt(a.end)}` : ""}`,
-            periodeOther: `${fmt(other.start)}${other.end !== other.start ? ` → ${fmt(other.end)}` : ""}`,
-          });
+      return { key, type: "salle_pleine", title: `Salle pleine — ${gr.lieu || gr.cabinet || "lieu non défini"} (capacité : ${gr.nbrEspace})`, color: "#d44c47", items: peers.map(p => ({ conflictWith: `${p.theme} — G${p.groupe}`, periode: `${fmt(gr.start)}${gr.end !== gr.start ? ` → ${fmt(gr.end)}` : ""}`, periodeOther: `${fmt(p.start)}${p.end !== p.start ? ` → ${fmt(p.end)}` : ""}`, lieu: gr.lieu || gr.cabinet || "même lieu", capacite: gr.nbrEspace, simultanes: peers.length + 1 })) };
+    }
+    if (cf?.has("overlap")) {
+      const lieuKey = [gr.lieu, gr.cabinet].filter(Boolean).join("||") || "default";
+      const peers = groupRows.filter(g => {
+        if (g.key === key || !g.start) return false;
+        const pLieuKey = [g.lieu, g.cabinet].filter(Boolean).join("||") || "default";
+        if (pLieuKey !== lieuKey) return false;
+        const overlap = g.start <= gr.end && gr.start <= g.end;
+        if (!overlap) return false;
+        if (gr.halfDay && g.halfDay) return gr.slot === g.slot;
+        return true;
+      });
+      return { key, type: "overlap", title: `Chevauchement de planning — ${gr.lieu || gr.cabinet || "lieu non défini"}`, color: "#d44c47", items: peers.map(p => ({ conflictWith: `${p.theme} — G${p.groupe}`, periode: `${fmt(gr.start)}${gr.end !== gr.start ? ` → ${fmt(gr.end)}` : ""}`, periodeOther: `${fmt(p.start)}${p.end !== p.start ? ` → ${fmt(p.end)}` : ""}`, lieu: gr.lieu || gr.cabinet || "même lieu", capacite: gr.nbrEspace, simultanes: peers.length + 1 })) };
+    }
+    if (candidatConflictKeys.has(key)) {
+      const details = [];
+      const byCandidat = {};
+      result.forEach(r => {
+        if (!r.start) return;
+        const mat = (r.matricule || "").trim().toLowerCase();
+        const vM = mat.length > 3 && mat !== "en cours de recrutement";
+        const cId = vM ? `mat:${mat}` : `np:${r.nom.toLowerCase()}__${r.prenom.toLowerCase()}`;
+        if (!byCandidat[cId]) byCandidat[cId] = [];
+        byCandidat[cId].push({ gKey: `${r.theme.trim()}||${r.groupe}`, theme: r.theme.trim(), groupe: r.groupe, start: r.start, end: r.end || r.start, halfDay: r.halfDay || false, slot: r.slot || null, nom: r.nom, prenom: r.prenom, matricule: r.matricule || "" });
+      });
+      Object.values(byCandidat).forEach(sessions => {
+        if (sessions.length < 2) return;
+        for (let i = 0; i < sessions.length; i++) {
+          for (let j = i + 1; j < sessions.length; j++) {
+            const a = sessions[i], b = sessions[j];
+            if (a.gKey === b.gKey) continue;
+            if (a.gKey !== key && b.gKey !== key) continue;
+            const overlap = a.start <= b.end && b.start <= a.end;
+            if (!overlap) continue;
+            if (a.halfDay && b.halfDay && a.slot !== b.slot) continue;
+            const other = a.gKey === key ? b : a;
+            details.push({ candidat: `${a.nom} ${a.prenom}${a.matricule ? ` (${a.matricule})` : ""}`, conflictWith: `${other.theme} — G${other.groupe}`, periode: `${fmt(a.start)}${a.end !== a.start ? ` → ${fmt(a.end)}` : ""}`, periodeOther: `${fmt(other.start)}${other.end !== other.start ? ` → ${fmt(other.end)}` : ""}` });
+          }
         }
-      }
-    });
+      });
+      return { key, type: "candidat_double", title: "Candidats planifiés sur deux formations simultanées", color: "#d44c47", items: details };
+    }
+    if (cf?.has("holiday")) {
+      return { key, type: "holiday", title: "La formation tombe sur un jour férié", color: "#448361", items: [{ conflictWith: "Jour férié marocain", periode: fmt(gr.start), periodeOther: "Déplacez la date de début" }] };
+    }
+    if (cf?.has("vacation")) {
+      const vac = vacs.find(v => gr.start >= v.start && gr.start <= v.end);
+      return { key, type: "vacation", title: "La formation tombe sur une période de congé", color: "#337ea9", items: [{ conflictWith: vac?.label || "Congé", periode: `${fmt(gr.start)} → ${fmt(gr.end)}`, periodeOther: vac ? `Congé : ${fmt(vac.start)} → ${fmt(vac.end)}` : "" }] };
+    }
+    return null;
+  }, [result, groupRows, conflictIndex, candidatConflictKeys, halfDayConflictKeys, wsStart, wsEnd, vacs]);
 
-    return {
-      key, type: "candidat_double",
-      title: "Candidats planifiés sur deux formations simultanées",
-      color: "#d44c47",
-      items: details,
-    };
-  }
-
-  // ── PRIORITÉ 6 : FÉRIÉ ───────────────────────────────────
-  if (cf?.has("holiday")) {
-    return {
-      key, type: "holiday",
-      title: "La formation tombe sur un jour férié",
-      color: "#448361",
-      items: [{ conflictWith: "Jour férié marocain", periode: fmt(gr.start), periodeOther: "Déplacez la date de début" }],
-    };
-  }
-
-  // ── PRIORITÉ 7 : CONGÉ ───────────────────────────────────
-  if (cf?.has("vacation")) {
-    const vac = vacs.find(v => gr.start >= v.start && gr.start <= v.end);
-    return {
-      key, type: "vacation",
-      title: "La formation tombe sur une période de congé",
-      color: "#337ea9",
-      items: [{ conflictWith: vac?.label || "Congé", periode: `${fmt(gr.start)} → ${fmt(gr.end)}`, periodeOther: vac ? `Congé : ${fmt(vac.start)} → ${fmt(vac.end)}` : "" }],
-    };
-  }
-
-  return null;
-}, [result, groupRows, conflictIndex, candidatConflictKeys, halfDayConflictKeys, wsStart, wsEnd, vacs]);
-
-  // ── updateGroupDates ─────────────────────────────────────────────
   const updateGroupDates = useCallback((key, field, value) => {
     setResult(prev => prev.map(r => {
       const rKey = `${r.theme.trim()}||${r.groupe}`;
       if (rKey !== key) return r;
       if (field === "start") {
         if (r.halfDay) return { ...r, start: value, end: value };
-        const newEnd = value && r.jours > 0
-          ? addWD(value, r.jours, wd, sh, vacs)
-          : r.end;
+        const newEnd = value && r.jours > 0 ? addWD(value, r.jours, wd, sh, vacs) : r.end;
         return { ...r, start: value, end: newEnd };
       }
       if (field === "slot") return { ...r, slot: value };
@@ -5008,192 +5674,129 @@ useEffect(() => {
     setGanttDone(false);
   }, [wd, sh, vacs]);
 
-  // ── Valeurs uniques par colonne (pour les selects) ───────────────
   const colUniqueValues = useMemo(() => {
     const uv = {};
     COL_DEFS.filter(c => c.filterable).forEach(col => {
       const s = new Set();
-      result.forEach(r => {
-        const v = r[col.key];
-        if (v && String(v).trim()) s.add(String(v).trim());
-      });
+      result.forEach(r => { const v = r[col.key]; if (v && String(v).trim()) s.add(String(v).trim()); });
       uv[col.key] = Array.from(s).sort();
     });
     return uv;
   }, [result]);
 
-  // ── Helper tri ───────────────────────────────────────────────────
   const handleSort = (field) => {
-    if (sortField === field) {
-      setSortDir(d => d === "asc" ? "desc" : "asc");
-    } else {
-      setSortField(field);
-      setSortDir("asc");
-    }
+    if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
   };
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <ArrowUpDown style={{ width: 9, height: 9, color: T.pageTer, marginLeft: 3, flexShrink: 0 }} />;
     return sortDir === "asc"
-      ? <ArrowUp   style={{ width: 9, height: 9, color: T.accent, marginLeft: 3, flexShrink: 0 }} />
+      ? <ArrowUp style={{ width: 9, height: 9, color: T.accent, marginLeft: 3, flexShrink: 0 }} />
       : <ArrowDown style={{ width: 9, height: 9, color: T.accent, marginLeft: 3, flexShrink: 0 }} />;
   };
 
-  // ── groupRowsFiltered ────────────────────────────────────────────
   const groupRowsFiltered = useMemo(() => {
     const enriched = groupRows.map(gr => {
-      const sample = result.find(r =>
-        `${r.theme.trim()}||${r.groupe}` === gr.key
-      ) || {};
-      return {
-        ...gr,
-        domaine:       sample.domaine       || "",
-        cabinet:       sample.cabinet       || "",
-        lieu:          sample.lieu          || "",
-        formateur:     sample.formateur     || "",
-        typeFormation: sample.typeFormation || "",
-        cout:          sample.cout          || "",
-        cnss:          sample.cnss          || "",
-        departement:   sample.departement   || "",
-        csp:           sample.csp           || "",
-        objectif:      sample.objectif      || "",
-        contenu:       sample.contenu       || "",
-        niveau:        sample.niveau        || "",
-        publicCible:   sample.publicCible   || "",
-      };
+      const sample = result.find(r => `${r.theme.trim()}||${r.groupe}` === gr.key) || {};
+      return { ...gr, domaine: sample.domaine || "", cabinet: sample.cabinet || "", lieu: sample.lieu || "", formateur: sample.formateur || "", typeFormation: sample.typeFormation || "", cout: sample.cout || "", cnss: sample.cnss || "", departement: sample.departement || "", csp: sample.csp || "", objectif: sample.objectif || "", contenu: sample.contenu || "", niveau: sample.niveau || "", publicCible: sample.publicCible || "" };
     });
-
     const getStatut = (gr) => {
-      const cf                  = conflictIndex[gr.key];
-      const hasOverlap          = cf?.has("overlap");
-      const hasSallePleine      = cf?.has("salle_pleine");
-      const hasHoliday          = cf?.has("holiday");
-      const hasVac              = cf?.has("vacation");
-      const hasHalfDayConflict  = halfDayConflictKeys.has(gr.key);
-      const hasCandidatConflict = candidatConflictKeys.has(gr.key);
-      const wsE                 = wsEnd || (wsStart ? `${wsStart.slice(0,4)}-12-31` : null);
-      const isOutOfRange        = wsE && gr.end && gr.end > wsE;
-      if (isOutOfRange || hasOverlap || hasSallePleine ||
-          hasHalfDayConflict || hasCandidatConflict ||
-          hasVac || hasHoliday) return "conflit";
+      const cf = conflictIndex[gr.key];
+      const wsE = wsEnd || (wsStart ? `${wsStart.slice(0, 4)}-12-31` : null);
+      const isOutOfRange = wsE && gr.end && gr.end > wsE;
+      if (isOutOfRange || cf?.has("overlap") || cf?.has("salle_pleine") || halfDayConflictKeys.has(gr.key) || candidatConflictKeys.has(gr.key) || cf?.has("vacation") || cf?.has("holiday")) return "conflit";
       if (gr.start) return "ok";
       return "planifier";
     };
-
     let rows = enriched.filter(gr => {
       for (const [key, val] of Object.entries(colFilters)) {
         if (!val || val === "") continue;
-        if (key === "statut") {
-          if (getStatut(gr) !== val) return false;
-          continue;
-        }
-        if (key === "theme") {
-          if (!gr.theme.toLowerCase().includes(val.toLowerCase())) return false;
-          continue;
-        }
-        const grVal = String(gr[key] || "").toLowerCase();
-        if (!grVal.includes(val.toLowerCase())) return false;
+        if (key === "statut") { if (getStatut(gr) !== val) return false; continue; }
+        if (key === "theme") { if (!gr.theme.toLowerCase().includes(val.toLowerCase())) return false; continue; }
+        if (!String(gr[key] || "").toLowerCase().includes(val.toLowerCase())) return false;
       }
       return true;
     });
-
     rows = [...rows].sort((a, b) => {
       let va, vb;
-      if (sortField === "statut") {
-        const order = { conflit: 0, planifier: 1, ok: 2 };
-        va = order[getStatut(a)] ?? 3;
-        vb = order[getStatut(b)] ?? 3;
-      } else if (sortField === "groupe") {
-        va = Number(a.groupe); vb = Number(b.groupe);
-      } else if (sortField === "count") {
-        va = a.count; vb = b.count;
-      } else if (sortField === "start" || sortField === "end") {
-        va = a[sortField] || "9999"; vb = b[sortField] || "9999";
-      } else if (sortField === "cout") {
-        va = parseFloat(String(a.cout).replace(/[^\d.]/g, "")) || 0;
-        vb = parseFloat(String(b.cout).replace(/[^\d.]/g, "")) || 0;
-      } else {
-        va = String(a[sortField] || "").toLowerCase();
-        vb = String(b[sortField] || "").toLowerCase();
-      }
+      if (sortField === "statut") { const order = { conflit: 0, planifier: 1, ok: 2 }; va = order[getStatut(a)] ?? 3; vb = order[getStatut(b)] ?? 3; }
+      else if (sortField === "groupe") { va = Number(a.groupe); vb = Number(b.groupe); }
+      else if (sortField === "count") { va = a.count; vb = b.count; }
+      else if (sortField === "start" || sortField === "end") { va = a[sortField] || "9999"; vb = b[sortField] || "9999"; }
+      else if (sortField === "cout") { va = parseFloat(String(a.cout).replace(/[^\d.]/g, "")) || 0; vb = parseFloat(String(b.cout).replace(/[^\d.]/g, "")) || 0; }
+      else { va = String(a[sortField] || "").toLowerCase(); vb = String(b[sortField] || "").toLowerCase(); }
       if (va < vb) return sortDir === "asc" ? -1 : 1;
-      if (va > vb) return sortDir === "asc" ?  1 : -1;
+      if (va > vb) return sortDir === "asc" ? 1 : -1;
       return 0;
     });
-
     return rows;
-  }, [
-    groupRows, result, conflictIndex, halfDayConflictKeys, candidatConflictKeys,
-    colFilters, sortField, sortDir, wsStart, wsEnd,
-  ]);
+  }, [groupRows, result, conflictIndex, halfDayConflictKeys, candidatConflictKeys, colFilters, sortField, sortDir, wsStart, wsEnd]);
 
-  // ── Champs bases ─────────────────────────────────────────────────
   const FIELDS_BASE1 = [
-    { key: "nomprenom",   label: "Nom complet (1 colonne)",  required: false },
-    { key: "nom",         label: "Nom",                      required: false },
-    { key: "prenom",      label: "Prénom",                   required: false },
-    { key: "intitule",    label: "Intitulé de formation ★",  required: true  },
-    { key: "heures",      label: "Nb heures ★",              required: true  },
-    { key: "matricule",   label: "Matricule",                required: false },
-    { key: "dateDebut",   label: "Date début",               required: false },
-    { key: "dateFin",     label: "Date fin",                 required: false },
-    { key: "departement", label: "Département / Service",    required: false },
-    { key: "csp",         label: "CSP / Catégorie",          required: false },
-    { key: "cout",        label: "Coût",                     required: false },
-  ];
+    { key: "nomprenom",   label: "Nom complet (1 colonne)", required: false },
+    { key: "nom",         label: "Nom",                     required: false },
+    { key: "prenom",      label: "Prénom",                  required: false },
+    { key: "intitule",    label: "Intitulé de formation ★", required: true  },
+    { key: "heures",      label: "Nb heures ★",             required: true  },
+    { key: "matricule",   label: "Matricule",               required: false },
+    { key: "dateDebut",   label: "Date début",              required: false },
+    { key: "dateFin",     label: "Date fin",                required: false },
+    { key: "departement", label: "Département / Service",   required: false },
+    { key: "csp",         label: "CSP / Catégorie",         required: false },
+    { key: "cout",        label: "Coût",                    required: false },
+    { key: "lieu",        label: "Lieu",                    required: false }, // ← AJOUT
+    { key: "cabinet",     label: "Cabinet",                 required: false }, // ← AJOUT
+];
   const FIELDS_BASE2 = [
-    { key: "intitule",     label: "Intitulé de formation ★", required: true  },
-    { key: "domaine",      label: "Domaine",                 required: false },
-    { key: "objectif",     label: "Objectif",                required: false },
-    { key: "contenu",      label: "Contenu",                 required: false },
-    { key: "duree",        label: "Durée (info)",            required: false },
-    { key: "niveau",       label: "Niveau",                  required: false },
-    { key: "public",       label: "Public cible",            required: false },
-    { key: "prerequis",    label: "Prérequis",               required: false },
-    { key: "typeFormation",label: "Type de formation",       required: false },
-    { key: "lieu",         label: "Lieu",                    required: false },
-    { key: "cout",         label: "Coût",                    required: false },
+    { key: "intitule",      label: "Intitulé de formation ★", required: true  },
+    { key: "domaine",       label: "Domaine",                 required: false },
+    { key: "objectif",      label: "Objectif",                required: false },
+    { key: "contenu",       label: "Contenu",                 required: false },
+    { key: "duree",         label: "Durée (info)",            required: false },
+    { key: "niveau",        label: "Niveau",                  required: false },
+    { key: "public",        label: "Public cible",            required: false },
+    { key: "prerequis",     label: "Prérequis",               required: false },
+    { key: "typeFormation", label: "Type de formation",       required: false },
+    { key: "lieu",          label: "Lieu",                    required: false },
+    { key: "cout",          label: "Coût",                    required: false },
   ];
   const FIELDS_BASE3 = [
-    { key: "intitule",     label: "Intitulé de formation ★", required: true  },
-    { key: "cabinet",      label: "Nom du cabinet ★",        required: true  },
-    { key: "cnss",         label: "N° CNSS",                 required: false },
-    { key: "nbrEspace",    label: "Nbr d'espace (Capacité)", required: false },
-    { key: "lieu",         label: "Lieu de formation",       required: false },
-    { key: "cout",         label: "Coût / personne",         required: false },
-    { key: "typeFormation",label: "Type de formation",       required: false },
-    { key: "contact",      label: "Contact / Tel",           required: false },
-    { key: "formateur",    label: "Formateur",               required: false },
+    { key: "intitule",      label: "Intitulé de formation ★", required: true  },
+    { key: "cabinet",       label: "Nom du cabinet ★",        required: true  },
+    { key: "cnss",          label: "N° CNSS",                 required: false },
+    { key: "nbrEspace",     label: "Nbr d'espace (Capacité)", required: false },
+    { key: "lieu",          label: "Lieu de formation",       required: false },
+    { key: "cout",          label: "Coût / personne",         required: false },
+    { key: "typeFormation", label: "Type de formation",       required: false },
+    { key: "contact",       label: "Contact / Tel",           required: false },
+    { key: "formateur",     label: "Formateur",               required: false },
   ];
 
-  // ── Styles ───────────────────────────────────────────────────────
   const iS  = { padding: "5px 9px", borderRadius: 4, border: `1px solid rgba(55,53,47,0.2)`, fontSize: 12, color: T.pageText, fontFamily: "inherit", outline: "none", background: "#fff", boxSizing: "border-box" };
   const fI  = e => { e.target.style.borderColor = T.accent; e.target.style.boxShadow = `0 0 0 2px ${T.accent}18`; };
   const fO  = e => { e.target.style.borderColor = "rgba(55,53,47,0.2)"; e.target.style.boxShadow = "none"; };
   const thS = { padding: "7px 10px", fontSize: 10, fontWeight: 600, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.06em", background: "rgba(55,53,47,0.03)", borderBottom: `1px solid ${T.pageBdr}`, textAlign: "left" };
   const tdS = { padding: "6px 10px", fontSize: 12, color: T.pageText, borderBottom: `1px solid ${T.pageBdr}` };
 
+  // ── Props communes pour BasePanel ────────────────────────────────
+  const basePanelCommonProps = { iS, fI, fO, thS, tdS, T, readExcelFile };
+
   const PROG = [
-    { key: 1,  label: "Intro"    },
-    { key: 2,  label: "Personnel"},
+    { key: 1,  label: "Intro"     },
+    { key: 2,  label: "Personnel" },
     { key: 4,  label: "Formations"},
-    { key: 6,  label: "Cabinets" },
-    { key: 8,  label: "Fusion"   },
-    { key: 9,  label: "Groupes"  },
-    { key: 10, label: "Résultat" },
+    { key: 6,  label: "Cabinets"  },
+    { key: 8,  label: "Fusion"    },
+    { key: 9,  label: "Groupes"   },
+    { key: 10, label: "Résultat"  },
   ];
   const visualStep = step >= 10 ? 10 : step >= 9 ? 9 : step >= 8 ? 8 : step >= 6 ? 6 : step >= 4 ? 4 : step >= 2 ? 2 : 1;
-  const stepTitle  = {
-    1:  "Import multi-bases Excel",
-    2:  "Base Personnel",
-    3:  "Vérification — Base Personnel",
-    4:  "Base Formations",
-    5:  "Vérification — Base Formations",
-    6:  "Base Cabinets",
-    7:  "Vérification — Base Cabinets",
-    8:  "Aperçu avant fusion",
-    9:  "Configurer les groupes",
-    10: "Résultat & Gantt",
+  const stepTitle = {
+    1: "Import multi-bases Excel", 2: "Base Personnel", 3: "Vérification — Base Personnel",
+    4: "Base Formations", 5: "Vérification — Base Formations", 6: "Base Cabinets",
+    7: "Vérification — Base Cabinets", 8: "Aperçu avant fusion",
+    9: "Configurer les groupes", 10: "Résultat & Gantt",
   }[step] || "";
 
   // ── readExcelFile ────────────────────────────────────────────────
@@ -5202,8 +5805,7 @@ useEffect(() => {
     setter(p => ({ ...p, fileError: "" }));
     const ext = file.name.split(".").pop().toLowerCase();
     if (!["xlsx", "xls", "csv", "ods"].includes(ext)) {
-      setter(p => ({ ...p, fileError: "Format non supporté (.xlsx, .xls, .csv)" }));
-      return;
+      setter(p => ({ ...p, fileError: "Format non supporté (.xlsx, .xls, .csv)" })); return;
     }
     const reader = new FileReader();
     reader.onload = e => {
@@ -5215,37 +5817,36 @@ useEffect(() => {
         const filt   = arr.filter(row => row.some(c => String(c).trim() !== ""));
         if (filt.length < 2) { setter(p => ({ ...p, fileError: "Fichier vide." })); return; }
         const maxC   = Math.max(...filt.map(r => r.length));
-        const padded = filt.map(r => {
-          const a = [...r];
-          while (a.length < maxC) a.push("");
-          return a.map(v => String(v ?? "").trim());
-        });
+        const padded = filt.map(r => { const a = [...r]; while (a.length < maxC) a.push(""); return a.map(v => String(v ?? "").trim()); });
         setter(p => ({ ...p, rows: padded, fileName: file.name, mapping: {} }));
-      } catch {
-        setter(p => ({ ...p, fileError: "Erreur de lecture." }));
-      }
+      } catch { setter(p => ({ ...p, fileError: "Erreur de lecture." })); }
     };
     reader.readAsArrayBuffer(file);
   }
 
   function isBaseReady(base, fields) {
     if (base.rows.length < 2) return false;
-    const m     = base.mapping;
-    const reqOk = fields.filter(f => f.required).every(f => m[f.key] >= 0);
-    const hasId = fields.some(f => f.key === "nomprenom")
-      ? (m["nomprenom"] >= 0 || (m["nom"] >= 0 && m["prenom"] >= 0))
-      : true;
+    const m = base.mapping;
+const reqOk = fields
+    .filter(f => f.required)
+    .every(f => m[f.key] !== undefined && Number(m[f.key]) >= 0);
+    const hasId = fields.some(f => f.key === "nomprenom") 
+        ? (m["nomprenom"] >= 0 || (m["nom"] >= 0 && m["prenom"] >= 0)) 
+        : true;
     return reqOk && hasId;
-  }
+}
   const b1Ready = isBaseReady(base1, FIELDS_BASE1);
   const b2Ready = isBaseReady(base2, FIELDS_BASE2);
-  const b3Ready = isBaseReady(base3, FIELDS_BASE3);
+  const b3Ready = isBaseReady(base3, FIELDS_BASE3.map(f =>
+    f.key === "cabinet" && base1.mapping["cabinet"] >= 0 
+        ? { ...f, required: false } 
+        : f
+));
 
-  // ── analyzeBase1 ─────────────────────────────────────────────────
   function analyzeBase1() {
-    const m   = base1.mapping;
+    const m = base1.mapping;
     const npi = m["nomprenom"] ?? -1, ni = m["nom"] ?? -1, pi = m["prenom"] ?? -1;
-    const ti  = m["intitule"]  ?? -1, mi = m["matricule"] ?? -1;
+    const ti = m["intitule"] ?? -1, mi = m["matricule"] ?? -1;
     const useCombo = npi >= 0;
     if ((!useCombo && (ni < 0 || pi < 0)) || ti < 0) return { anomalies: [], excluded: new Set() };
     const records = base1.rows.slice(1).map((r, i) => {
@@ -5256,9 +5857,9 @@ useEffect(() => {
     }).filter(r => r.theme);
     const mG = {}, nG = {}, eG = {};
     records.forEach(r => {
-      const fn  = `${r.nom.toLowerCase()} ${r.prenom.toLowerCase()}`;
+      const fn = `${r.nom.toLowerCase()} ${r.prenom.toLowerCase()}`;
       const mat = r.matricule.toLowerCase();
-      const vM  = mat.length > 3 && mat !== "en cours de recrutement";
+      const vM = mat.length > 3 && mat !== "en cours de recrutement";
       if (vM) { if (!mG[mat]) mG[mat] = []; mG[mat].push(r); }
       if (fn.trim()) { if (!nG[fn]) nG[fn] = []; nG[fn].push(r); }
       const ek = `${fn}__${mat}__${r.theme.toLowerCase()}`;
@@ -5271,9 +5872,8 @@ useEffect(() => {
     return { anomalies: det, excluded: ex };
   }
 
-  // ── analyzeBaseEnrich ────────────────────────────────────────────
   function analyzeBaseEnrich(base) {
-    const m  = base.mapping;
+    const m = base.mapping;
     const ti = m["intitule"] ?? -1;
     if (ti < 0) return { anomalies: [], excluded: new Set() };
     const records = base.rows.slice(1).map((r, i) => ({ idx: i + 1, intitule: (r[ti] || "").trim() })).filter(r => r.intitule);
@@ -5284,7 +5884,6 @@ useEffect(() => {
     return { anomalies: det, excluded: ex };
   }
 
-  // ── exportAnomalies ──────────────────────────────────────────────
   function exportAnomalies(anomalies, label) {
     const rows = [];
     anomalies.forEach(a => a.records.forEach(r => {
@@ -5298,7 +5897,7 @@ useEffect(() => {
     showToast(`${rows.length} anomalies exportées`, "success");
   }
 
-  // ── AnomaliesPanel ───────────────────────────────────────────────
+  // ── AnomaliesPanel — reste DANS le composant (pas de hooks, pas de scroll) ──
   function AnomaliesPanel({ anomalies, excluded, setExcluded, label, onExport }) {
     const totalRows = anomalies.reduce((s, a) => s + a.records.length, 0);
     return (
@@ -5361,294 +5960,95 @@ useEffect(() => {
     );
   }
 
-  // ── BasePanel ────────────────────────────────────────────────────
-  function BasePanel({ base, setter, fields, fileRef, color }) {
-    const headers = base.rows[0] || [];
-    const preview = base.rows.slice(1, 5);
-    const mapping = base.mapping;
-    const hasId   = fields.some(f => f.key === "nomprenom")
-      ? (mapping["nomprenom"] >= 0 || (mapping["nom"] >= 0 && mapping["prenom"] >= 0))
-      : true;
-    const canMap  = fields.filter(f => f.required).every(f => mapping[f.key] >= 0) && hasId;
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div
-          onDragOver={e => { e.preventDefault(); setter(p => ({ ...p, dragOver: true })); }}
-          onDragLeave={() => setter(p => ({ ...p, dragOver: false }))}
-          onDrop={e => { e.preventDefault(); setter(p => ({ ...p, dragOver: false })); readExcelFile(e.dataTransfer.files[0], setter); }}
-          onClick={() => fileRef.current?.click()}
-          style={{ border: `2px dashed ${base.dragOver ? color : "rgba(55,53,47,0.15)"}`, borderRadius: 7, padding: "20px 16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, cursor: "pointer", background: base.dragOver ? `${color}06` : "rgba(55,53,47,0.01)", transition: "all 0.12s", minHeight: 90 }}
-        >
-          <FileUp style={{ width: 18, height: 18, color: base.fileName ? color : T.pageTer }} />
-          {base.fileName
-            ? <div style={{ textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 600, color: T.pageText }}>{base.fileName}</div><div style={{ fontSize: 11, color: T.pageSub }}>{base.rows.length - 1} lignes · Cliquer pour remplacer</div></div>
-            : <div style={{ textAlign: "center" }}><div style={{ fontSize: 13, color: T.pageText }}>Glisser-déposer ou <span style={{ color: T.accent, fontWeight: 600 }}>parcourir</span></div><div style={{ fontSize: 11, color: T.pageTer, marginTop: 2 }}>.xlsx · .xls · .csv · .ods</div></div>
-          }
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.ods" style={{ display: "none" }} onChange={e => { readExcelFile(e.target.files?.[0], setter); e.target.value = ""; }} />
-        </div>
-        {base.fileError && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 4, background: "rgba(212,76,71,0.05)", border: "1px solid rgba(212,76,71,0.2)", color: "#d44c47", fontSize: 12 }}>
-            <AlertTriangle style={{ width: 12, height: 12, flexShrink: 0 }} />{base.fileError}
-          </div>
-        )}
-        {base.rows.length > 0 && (
-          <>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em" }}>Associer les colonnes</div>
-            <div style={{ overflowX: "auto", border: `1px solid ${T.pageBdr}`, borderRadius: 6 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 300 }}>
-                <thead>
-                  <tr style={{ background: "rgba(55,53,47,0.02)" }}>
-                    {headers.map((h, ci) => (
-                      <th key={ci} style={{ ...thS, minWidth: 110 }}>
-                        <select
-                          value={Object.entries(mapping).find(([, v]) => v === ci)?.[0] || ""}
-                          onChange={e => {
-                            const field = e.target.value;
-                            setter(p => {
-                              const next = { ...p.mapping };
-                              Object.keys(next).forEach(k => { if (next[k] === ci) next[k] = -1; });
-                              if (field) { Object.keys(next).forEach(k => { if (k === field) next[k] = -1; }); next[field] = ci; }
-                              return { ...p, mapping: next };
-                            });
-                          }}
-                          style={{ ...iS, width: "100%", fontSize: 11 }}
-                        >
-                          <option value="">— Ignorer —</option>
-                          {fields.map(f => <option key={f.key} value={f.key} disabled={mapping[f.key] >= 0 && mapping[f.key] !== ci}>{f.label}</option>)}
-                        </select>
-                      </th>
-                    ))}
-                  </tr>
-                  <tr>
-                    {headers.map((h, ci) => (
-                      <th key={ci} style={{ ...thS, color: T.pageText, fontWeight: 600, fontSize: 11, background: Object.values(mapping).includes(ci) ? `${color}08` : undefined }}>
-                        {h || `Col ${ci + 1}`}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.map((row, ri) => (
-                    <tr key={ri}>
-                      {row.map((cell, ci) => (
-                        <td key={ci} style={{ ...tdS, background: Object.values(mapping).includes(ci) ? `${color}06` : undefined, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11 }} title={cell}>{cell}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-              {fields.map(f => {
-                if (f.key === "nom" || f.key === "prenom") return null;
-                if (f.key === "nomprenom" && fields.some(ff => ff.key === "nom")) {
-                  const ok = mapping["nomprenom"] >= 0 || (mapping["nom"] >= 0 && mapping["prenom"] >= 0);
-                  return (
-                    <span key="ident" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 3, fontSize: 11, border: `1px solid ${ok ? "rgba(68,131,97,0.3)" : T.pageBdr}`, background: ok ? "rgba(68,131,97,0.07)" : "transparent", color: ok ? "#448361" : T.pageSub }}>
-                      {ok ? <Check style={{ width: 9, height: 9 }} /> : <div style={{ width: 9, height: 9, borderRadius: "50%", border: `1.5px solid ${T.pageTer}` }} />}Identité
-                    </span>
-                  );
-                }
-                const ok = mapping[f.key] >= 0;
-                return (
-                  <span key={f.key} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 3, fontSize: 11, border: `1px solid ${ok ? "rgba(68,131,97,0.3)" : f.required ? "rgba(212,76,71,0.3)" : T.pageBdr}`, background: ok ? "rgba(68,131,97,0.07)" : f.required ? "rgba(212,76,71,0.04)" : "transparent", color: ok ? "#448361" : f.required ? "#d44c47" : T.pageSub }}>
-                    {ok ? <Check style={{ width: 9, height: 9 }} /> : <div style={{ width: 9, height: 9, borderRadius: "50%", border: `1.5px solid ${f.required ? "#d44c47" : T.pageTer}` }} />}
-                    {(f.label || f.key).replace(" ★", "")}{f.required ? " ★" : ""}
-                  </span>
-                );
-              })}
-            </div>
-            {canMap && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#448361" }}>
-                <CheckCircle2 style={{ width: 12, height: 12 }} /> Mapping complet — prêt à vérifier
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    );
-  }
-
-  // ── fusionBases (Étape 8) ──────────────────────────────────────────────────
   function fusionBases() {
     const m1 = base1.mapping, r1 = base1.rows;
     const m2 = base2.mapping, r2 = base2.rows;
     const m3 = base3.mapping, r3 = base3.rows;
-    
-    // 1. On identifie les colonnes du fichier Personnel qui ont été mappées
-    //    pour savoir lesquelles conserver en tant que "données brutes"
     const headers1 = r1[0] || [];
     const mappedIndices1 = new Set(Object.values(m1).filter(v => v >= 0));
-
-    // 2. Indexation de la Base 2 (Formations)
     const idx2 = {};
     r2.slice(1).forEach((row, i) => {
       if (excluded2.has(i + 1)) return;
       const k = (row[m2["intitule"]] || "").trim().toLowerCase();
-      if (k && !idx2[k]) { 
-        const e = {}; 
-        FIELDS_BASE2.filter(f => f.key !== "intitule" && m2[f.key] >= 0).forEach(f => { 
-          e[f.key] = row[m2[f.key]] || ""; 
-        }); 
-        idx2[k] = e; 
-      }
+      if (k && !idx2[k]) { const e = {}; FIELDS_BASE2.filter(f => f.key !== "intitule" && m2[f.key] >= 0).forEach(f => { e[f.key] = row[m2[f.key]] || ""; }); idx2[k] = e; }
     });
-
-    // 3. Indexation de la Base 3 (Cabinets)
     const idx3 = {};
     r3.slice(1).forEach((row, i) => {
       if (excluded3.has(i + 1)) return;
       const k = (row[m3["intitule"]] || "").trim().toLowerCase();
-      if (k && !idx3[k]) { 
-        const e = {}; 
-        FIELDS_BASE3.filter(f => f.key !== "intitule" && m3[f.key] >= 0).forEach(f => { 
-          e[f.key] = row[m3[f.key]] || ""; 
-        }); 
-        idx3[k] = e; 
-      }
+      if (k && !idx3[k]) { const e = {}; FIELDS_BASE3.filter(f => f.key !== "intitule" && m3[f.key] >= 0).forEach(f => { e[f.key] = row[m3[f.key]] || ""; }); idx3[k] = e; }
     });
-
-    // 4. Fusion des données à partir de la Base 1 (Personnel)
     const useCombo = m1["nomprenom"] >= 0;
     const fused = [];
-
     r1.slice(1).forEach((row, idx) => {
       if (excluded1.has(idx + 1)) return;
-      
       const intitRaw = (row[m1["intitule"]] || "").trim();
       if (!intitRaw) return;
-
-      // Traitement de l'identité
       let nom = "", prenom = "";
-      if (useCombo) { 
-        const sp = splitFullName(row[m1["nomprenom"]]); 
-        nom = sp.nom; 
-        prenom = sp.prenom; 
-      } else { 
-        nom = (row[m1["nom"]] || "").trim(); 
-        prenom = (row[m1["prenom"]] || "").trim(); 
-      }
-
-      // --- NOUVEAU : CAPTURE DES COLONNES NON-MAPPÉES ---
+      if (useCombo) { const sp = splitFullName(row[m1["nomprenom"]]); nom = sp.nom; prenom = sp.prenom; }
+      else { nom = (row[m1["nom"]] || "").trim(); prenom = (row[m1["prenom"]] || "").trim(); }
       const unmappedData = {};
-      headers1.forEach((headerName, colIdx) => {
-        if (!mappedIndices1.has(colIdx)) {
-          const key = headerName || `Colonne ${colIdx + 1}`;
-          unmappedData[key] = row[colIdx] || "";
-        }
-      });
-      // ------------------------------------------------
-
-      const h    = parseRawDuration(m1["heures"] >= 0 ? row[m1["heures"]] : "", durationUnit);
+      headers1.forEach((headerName, colIdx) => { if (!mappedIndices1.has(colIdx)) { unmappedData[headerName || `Colonne ${colIdx + 1}`] = row[colIdx] || ""; } });
+      const h = parseRawDuration(m1["heures"] >= 0 ? row[m1["heures"]] : "", durationUnit);
       const half = isHalfDay(h);
-      const b2   = idx2[intitRaw.toLowerCase()] || {};
-      const b3   = idx3[intitRaw.toLowerCase()] || {};
-      const dd   = m1["dateDebut"] >= 0 ? parseExcelDate(row[m1["dateDebut"]]) : "";
-
+      const b2 = idx2[intitRaw.toLowerCase()] || {};
+      const b3 = idx3[intitRaw.toLowerCase()] || {};
+      const dd = m1["dateDebut"] >= 0 ? parseExcelDate(row[m1["dateDebut"]]) : "";
       fused.push({
-        nom, 
-        prenom, 
-        theme: intitRaw, 
-        heures: h, 
-        jours: half ? 0.5 : hrs2j(h), 
-        halfDay: half,
+        nom, prenom, theme: intitRaw, heures: h, jours: half ? 0.5 : hrs2j(h), halfDay: half,
         matricule: m1["matricule"] >= 0 ? (row[m1["matricule"]] || "").trim() : "",
-        start: dd,
-        end: m1["dateFin"] >= 0 ? parseExcelDate(row[m1["dateFin"]]) : "",
-        hasPreDates: !!dd,
-        
-        // Stockage des données supplémentaires brutes
-        unmappedData,
-
-        // Données enrichies Base Personnel
+        start: dd, end: m1["dateFin"] >= 0 ? parseExcelDate(row[m1["dateFin"]]) : "",
+        hasPreDates: !!dd, unmappedData,
         departement: m1["departement"] >= 0 ? row[m1["departement"]] || "" : "",
         csp: m1["csp"] >= 0 ? row[m1["csp"]] || "" : "",
-        
-        // Données enrichies Base Formations
-        domaine: b2["domaine"] || "",
-        objectif: b2["objectif"] || "",
-        contenu: b2["contenu"] || "",
-        niveau: b2["niveau"] || "",
-        publicCible: b2["public"] || "",
-        
-        // Données enrichies Base Cabinets
+        domaine: b2["domaine"] || "", objectif: b2["objectif"] || "", contenu: b2["contenu"] || "",
+        niveau: b2["niveau"] || "", publicCible: b2["public"] || "",
         typeFormation: b3["typeFormation"] || b2["typeFormation"] || "",
-        cabinet: b3["cabinet"] || "",
-        cnss: b3["cnss"] || "",
-        lieu: b3["lieu"] || "",
+cabinet: (m1["cabinet"] >= 0 ? row[m1["cabinet"]] || "" : "") || b3["cabinet"] || "",
+cnss: b3["cnss"] || "",
+lieu: (m1["lieu"] >= 0 ? row[m1["lieu"]] || "" : "") || b3["lieu"] || "",
         nbrEspace: Math.max(1, parseInt(b3["nbrEspace"] || "") || 1),
-        cout: b3["cout"] || "",
-        formateur: b3["formateur"] || "",
-        contact: b3["contact"] || "",
-        
-        groupe: 1, 
-        statut: "Reçu", 
-        id: uid(),
+        cout: b3["cout"] || "", formateur: b3["formateur"] || "", contact: b3["contact"] || "",
+        groupe: 1, statut: "Reçu", id: uid(),
       });
     });
-
     setMerged(fused);
-
-    // Préparation de la configuration des groupes (Étape 9)
     const tmap = {};
     fused.forEach(r => {
       const dk = r.hasPreDates ? `${r.start}__${r.end}` : "__";
       const tk = `${r.theme}__${dk}`;
-      if (!tmap[tk]) {
-        tmap[tk] = { 
-          theme: r.theme, 
-          total: 0, 
-          jours: r.jours, 
-          heures: r.heures, 
-          halfDay: r.halfDay, 
-          perGroup: "15", 
-          preDateDebut: r.hasPreDates ? r.start : "", 
-          preDateFin: r.hasPreDates ? r.end : "", 
-          hasPreDates: r.hasPreDates, 
-          _set: new Set() 
-        };
-      }
+      if (!tmap[tk]) tmap[tk] = { theme: r.theme, total: 0, jours: r.jours, heures: r.heures, halfDay: r.halfDay, perGroup: "15", preDateDebut: r.hasPreDates ? r.start : "", preDateFin: r.hasPreDates ? r.end : "", hasPreDates: r.hasPreDates, _set: new Set() };
       const mat = r.matricule;
-      const vM  = mat.length > 3 && mat.toLowerCase() !== "en cours de recrutement";
+      const vM = mat.length > 3 && mat.toLowerCase() !== "en cours de recrutement";
       tmap[tk]._set.add(vM ? mat.toLowerCase() : `${r.nom.toLowerCase()}__${r.prenom.toLowerCase()}`);
       tmap[tk].total = tmap[tk]._set.size;
     });
-
     setThemeConf(Object.values(tmap).map(({ _set, ...rest }) => rest));
     setStep(9);
   }
 
-  // ── generateGroups ───────────────────────────────────────────────
   function generateGroups() {
     const byThemeDate = {};
     merged.forEach(r => {
       const gk = `${r.theme}__${r.hasPreDates ? `${r.start}__${r.end}` : "__"}`;
       if (!byThemeDate[gk]) byThemeDate[gk] = [];
       const mat = r.matricule;
-      const vM  = mat.length > 3 && mat.toLowerCase() !== "en cours de recrutement";
-      const ck  = vM ? mat.toLowerCase() : `${r.nom.toLowerCase()}__${r.prenom.toLowerCase()}`;
+      const vM = mat.length > 3 && mat.toLowerCase() !== "en cours de recrutement";
+      const ck = vM ? mat.toLowerCase() : `${r.nom.toLowerCase()}__${r.prenom.toLowerCase()}`;
       if (!byThemeDate[gk].find(c => c._ck === ck)) byThemeDate[gk].push({ ...r, _ck: ck });
     });
     const gCount = {}, res = [];
     Object.entries(byThemeDate).forEach(([gk, cands]) => {
       if (!cands.length) return;
-      const tc  = themeConf.find(t => `${t.theme}__${t.preDateDebut ? `${t.preDateDebut}__${t.preDateFin}` : "__"}` === gk);
-      const pg  = Math.max(1, parseInt(tc?.perGroup) || 15);
+      const tc = themeConf.find(t => `${t.theme}__${t.preDateDebut ? `${t.preDateDebut}__${t.preDateFin}` : "__"}` === gk);
+      const pg = Math.max(1, parseInt(tc?.perGroup) || 15);
       const theme = cands[0].theme;
       if (!gCount[theme]) gCount[theme] = 0;
       const dist = distributeBalanced(cands, pg);
       [...new Set(dist.map(c => c.groupe))].forEach(lg => {
         gCount[theme]++;
         const gg = gCount[theme];
-        dist.filter(c => c.groupe === lg).forEach(c => res.push({
-          ...c, groupe: gg,
-          unmappedData: c.unmappedData,
-          start:       tc?.hasPreDates ? tc.preDateDebut : "",
-          end:         tc?.hasPreDates ? tc.preDateFin   : "",
-          hasPreDates: !!tc?.hasPreDates,
-          nbrEspace:   c.nbrEspace || 1,
-          id:          uid(),
-        }));
+        dist.filter(c => c.groupe === lg).forEach(c => res.push({ ...c, groupe: gg, unmappedData: c.unmappedData, start: tc?.hasPreDates ? tc.preDateDebut : "", end: tc?.hasPreDates ? tc.preDateFin : "", hasPreDates: !!tc?.hasPreDates, nbrEspace: c.nbrEspace || 1, id: uid() }));
       });
     });
     setResult(res);
@@ -5656,115 +6056,369 @@ useEffect(() => {
     setStep(10);
   }
 
-  // ── generateGantt ────────────────────────────────────────────────
-  function generateGantt() {
-    const startDay  = snap(wsStart || d2s(new Date()), wd, sh, vacs);
-    const wsEndDate = wsEnd || (() => {
-      const yr = startDay ? startDay.slice(0, 4) : new Date().getFullYear();
-      return `${yr}-12-31`;
-    })();
+  // ── Utilitaire : vérifie si un créneau (start, end, halfDay, slot) entre 
+//    en conflit avec les tâches déjà planifiées pour un lieu donné
+function hasLieuConflict(start, end, halfDay, slot, lieuKey, plannedByLieu) {
+  const peers = plannedByLieu[lieuKey] || [];
+  for (const p of peers) {
+    if (!p.start) continue;
+    const overlap = p.start <= end && p.end >= start;
+    if (!overlap) continue;
+    // Deux demi-journées ne conflictent que si même créneau
+    if (halfDay && p.halfDay && slot !== p.slot) continue;
+    return true;
+  }
+  return false;
+}
 
-    const groupsMap = new Map();
-    result.forEach(r => {
-      const k = `${r.theme.trim()}||${r.groupe}`;
-      if (!groupsMap.has(k)) groupsMap.set(k, {
+// ── Vérifie si un candidat est déjà planifié sur un autre groupe en chevauchement
+function hasCandidatConflict(candidatKeys, themeGroupe, start, end, halfDay, slot, candidatRegistry) {
+  for (const ck of candidatKeys) {
+    const sessions = candidatRegistry[ck] || [];
+    for (const s of sessions) {
+      if (s.themeGroupe === themeGroupe) continue;
+      const overlap = s.start <= end && s.end >= start;
+      if (!overlap) continue;
+      if (halfDay && s.halfDay && slot !== s.slot) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+// ── Avance une date en sautant weekends + fériés + congés
+function nextWorkingDay(date, wd, sh, vacs) {
+  return snap(d2s(ad(pd(date), 1)), wd, sh, vacs);
+}
+
+function generateGantt() {
+  // ── Snapshot des paramètres au moment de la génération
+  const currentWd   = wd;        // ex: [0, 6] = dim + sam
+  const currentSh   = sh;        // true = fériés marocains exclus
+  const currentVacs = vacs;      // [{id, label, start, end}]
+
+  // ── Helpers locaux avec les bons paramètres capturés
+  const snapDate = (d) => snap(d, currentWd, currentSh, currentVacs);
+  const addWorkDays = (d, n) => addWD(d, n, currentWd, currentSh, currentVacs);
+  const nextWD = (d) => snapDate(d2s(ad(pd(d), 1)));
+
+  // ── Vérifie si une date est dans les vacances/congés
+  const isInVacation = (dateStr) => {
+    return currentVacs.some(v => dateStr >= v.start && dateStr <= v.end);
+  };
+
+  // ── Vérifie si une date est dans l'intervalle du workspace
+  const isInWsRange = (dateStr) => {
+    if (wsStart && dateStr < wsStart) return false;
+    if (wsEnd   && dateStr > wsEnd)   return false;
+    return true;
+  };
+
+  // ── Point de départ : premier jour ouvré dans l'intervalle WS
+  const rawStart = wsStart || d2s(new Date());
+  const startDay = snapDate(rawStart);
+
+  const wsEndDate = wsEnd || (() => {
+    const yr = startDay ? startDay.slice(0, 4) : new Date().getFullYear();
+    return `${yr}-12-31`;
+  })();
+
+  // ── 1. Construire la map des groupes
+  const groupsMap = new Map();
+  result.forEach(r => {
+    const k = `${r.theme.trim()}||${r.groupe}`;
+    if (!groupsMap.has(k)) {
+      groupsMap.set(k, {
         theme:        r.theme.trim(),
         groupe:       String(r.groupe),
         heures:       r.heures,
-        jours:        r.jours  || 1,
+        jours:        r.jours || 1,
         slots:        hrs2slots(r.heures),
         hasPreDates:  !!(r.start && r.start.length === 10),
         preDateDebut: r.start || "",
         preDateFin:   r.end   || "",
         nbrEspace:    Math.max(1, r.nbrEspace || 1),
-        lieu:         r.lieu   || "",
+        lieu:         r.lieu    || "",
         cabinet:      r.cabinet || "",
+        candidatKeys: [],
       });
-    });
+    }
+    // Accumuler les clés candidats
+    const g = groupsMap.get(k);
+    const mat = (r.matricule || "").trim().toLowerCase();
+    const vM  = mat.length > 3 && mat !== "en cours de recrutement";
+    const ck  = vM
+      ? `mat:${mat}`
+      : `np:${r.nom.toLowerCase()}__${r.prenom.toLowerCase()}`;
+    if (!g.candidatKeys.includes(ck)) g.candidatKeys.push(ck);
+  });
 
-    const all    = Array.from(groupsMap.values());
-    const prePl  = all.filter(g => g.hasPreDates);
-    const toSch  = all.filter(g => !g.hasPreDates);
-    const newTasks = [];
+  const all   = Array.from(groupsMap.values());
+  const prePl = all.filter(g => g.hasPreDates);
+  const toSch = all.filter(g => !g.hasPreDates);
 
-    prePl.forEach(g => newTasks.push({
-      id:      uid(),
-      name:    `${g.theme} — Grp ${g.groupe}`,
-      group:   g.theme,
-      groupe:  g.groupe,
-      start:   g.preDateDebut,
-      end:     g.preDateFin || g.preDateDebut,
-      halfDay: g.slots === 1,
-      slot:    null,
-      _key:    `${g.theme}||${g.groupe}`,
-    }));
+  // ── 2. Registres temps-réel
+  const plannedByLieu   = {};  // lieuKey → [{start,end,halfDay,slot,themeGroupe}]
+  const candidatReg     = {};  // candidatKey → [{themeGroupe,start,end,halfDay,slot}]
 
-    const byLieu = {};
-    toSch.forEach(g => {
-      const lieuKey = [g.lieu, g.cabinet].filter(Boolean).join("||") || "default";
-      if (!byLieu[lieuKey]) byLieu[lieuKey] = { nbrEspace: g.nbrEspace, halves: [], fulls: [] };
-      byLieu[lieuKey].nbrEspace = Math.max(byLieu[lieuKey].nbrEspace, g.nbrEspace);
-      if (g.slots === 1) byLieu[lieuKey].halves.push(g);
-      else               byLieu[lieuKey].fulls.push(g);
-    });
+  const registerTask = (lieuKey, themeGroupe, start, end, halfDay, slot, candidatKeys) => {
+    if (!plannedByLieu[lieuKey]) plannedByLieu[lieuKey] = [];
+    plannedByLieu[lieuKey].push({ start, end, halfDay, slot, themeGroupe });
+    for (const ck of candidatKeys) {
+      if (!candidatReg[ck]) candidatReg[ck] = [];
+      candidatReg[ck].push({ themeGroupe, start, end, halfDay, slot });
+    }
+  };
 
-    Object.entries(byLieu).forEach(([, { nbrEspace, halves, fulls }]) => {
-      const nFiles     = Math.max(1, nbrEspace);
-      const fileCursors = Array.from({ length: nFiles }, () => startDay);
-      const bestFile   = () => { let b = 0; for (let f = 1; f < nFiles; f++) { if (fileCursors[f] < fileCursors[b]) b = f; } return b; };
+  // ── 3. Vérif conflit lieu (overlap en tenant compte capacité)
+  const hasLieuConflict = (start, end, halfDay, slot, lieuKey, capacity) => {
+    const peers = plannedByLieu[lieuKey] || [];
+    // Compter les groupes simultanés
+    const simultaneous = peers.filter(p => {
+      if (!p.start) return false;
+      const overlap = p.start <= end && p.end >= start;
+      if (!overlap) return false;
+      if (halfDay && p.halfDay && slot !== p.slot) return false;
+      return true;
+    }).length;
+    return simultaneous >= capacity; // conflit si on dépasse la capacité
+  };
 
-      fulls.forEach(g => {
-        const bf = bestFile();
-        const s  = fileCursors[bf];
-        const nb = Math.max(1, g.jours);
-        const e  = addWD(s, nb - 1, wd, sh, vacs);
-        newTasks.push({ id: uid(), name: `${g.theme} — Grp ${g.groupe}`, group: g.theme, groupe: g.groupe, start: s, end: e, halfDay: false, slot: null, _key: `${g.theme}||${g.groupe}` });
-        fileCursors[bf] = snap(d2s(ad(pd(e), 1)), wd, sh, vacs);
-      });
-
-      let i = 0;
-      while (i < halves.length) {
-        const bf = bestFile();
-        const ds = fileCursors[bf];
-        const g1 = halves[i];
-        const g2 = halves[i + 1] || null;
-        newTasks.push({ id: uid(), name: `${g1.theme} — Grp ${g1.groupe}`, group: g1.theme, groupe: g1.groupe, start: ds, end: ds, halfDay: true, slot: "matin", _key: `${g1.theme}||${g1.groupe}` });
-        if (g2) {
-          newTasks.push({ id: uid(), name: `${g2.theme} — Grp ${g2.groupe}`, group: g2.theme, groupe: g2.groupe, start: ds, end: ds, halfDay: true, slot: "après-midi", _key: `${g2.theme}||${g2.groupe}` });
-          i += 2;
-        } else {
-          i++;
-        }
-        fileCursors[bf] = snap(d2s(ad(pd(ds), 1)), wd, sh, vacs);
+  // ── 4. Vérif conflit candidat
+  const hasCandidatConflict = (candidatKeys, themeGroupe, start, end, halfDay, slot) => {
+    for (const ck of candidatKeys) {
+      const sessions = candidatReg[ck] || [];
+      for (const s of sessions) {
+        if (s.themeGroupe === themeGroupe) continue;
+        const overlap = s.start <= end && s.end >= start;
+        if (!overlap) continue;
+        if (halfDay && s.halfDay && slot !== s.slot) continue;
+        return true;
       }
+    }
+    return false;
+  };
+
+  // ── 5. Trouve la prochaine date candidate libre (post-snap)
+  //    Avance jusqu'à trouver un jour qui :
+  //    - est ouvré (snap le garantit)
+  //    - est dans l'intervalle WS
+  //    - n'est PAS dans une période de vacances/congé
+  const findNextFreeDate = (fromDate) => {
+    let d = snapDate(fromDate);
+    let safety = 0;
+    while (safety++ < 730) {
+      // snap gère déjà weekends + fériés, mais on re-vérifie les vacances
+      // au cas où snap ne les gèrerait pas parfaitement
+      if (!isInVacation(d) && isInWsRange(d)) return d;
+      d = nextWD(d);
+    }
+    return d; // fallback
+  };
+
+  const newTasks = [];
+  const MAX_ITER = 730;
+
+  // ── 6. Enregistrer les pré-planifiés en premier
+  for (const g of prePl) {
+    const lieuKey     = [g.lieu, g.cabinet].filter(Boolean).join("||") || "default";
+    const themeGroupe = `${g.theme}||${g.groupe}`;
+    const start       = g.preDateDebut;
+    const end         = g.preDateFin || g.preDateDebut;
+
+    newTasks.push({
+      id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
+      group: g.theme, groupe: g.groupe,
+      start, end, halfDay: g.slots === 1, slot: null,
+      _key: themeGroupe,
     });
+    registerTask(lieuKey, themeGroupe, start, end, g.slots === 1, null, g.candidatKeys);
+  }
 
-    let outOfRange = 0;
-    newTasks.forEach(t => { if (t.end > wsEndDate) outOfRange++; });
-    const totalFiles = Object.values(byLieu).reduce((s, l) => s + Math.max(1, l.nbrEspace), 0);
-    const nLieux     = Object.keys(byLieu).length;
+  // ── 7. Grouper les groupes à planifier par lieu
+  const byLieu = {};
+  for (const g of toSch) {
+    const lieuKey = [g.lieu, g.cabinet].filter(Boolean).join("||") || "default";
+    if (!byLieu[lieuKey]) byLieu[lieuKey] = { nbrEspace: g.nbrEspace, halves: [], fulls: [] };
+    byLieu[lieuKey].nbrEspace = Math.max(byLieu[lieuKey].nbrEspace, g.nbrEspace);
+    if (g.slots === 1) byLieu[lieuKey].halves.push(g);
+    else               byLieu[lieuKey].fulls.push(g);
+  }
 
-    const taskMap = {};
-    newTasks.forEach(t => { taskMap[t._key] = t; });
+  // ── 8. Planifier full-day avec backtracking complet
+  for (const [lieuKey, { nbrEspace, fulls }] of Object.entries(byLieu)) {
+    const nFiles      = Math.max(1, nbrEspace);
+    // Initialiser les curseurs au premier jour libre dans l'intervalle WS
+    const fileCursors = Array.from({ length: nFiles }, () => findNextFreeDate(startDay));
 
-    const updated = result.map(r => {
-      const t = taskMap[`${r.theme.trim()}||${r.groupe}`];
-      return { ...r, start: t ? t.start : r.start, end: t ? t.end : r.end, halfDay: t ? t.halfDay : (r.halfDay || false), slot: t ? t.slot : (r.slot || null) };
-    });
+    const bestFileIdx = () => {
+      let b = 0;
+      for (let f = 1; f < nFiles; f++) {
+        if (fileCursors[f] < fileCursors[b]) b = f;
+      }
+      return b;
+    };
 
-    setResult(updated);
-    setGanttDone(true);
-    batchTasksRef.current = newTasks.map(({ _key, ...t }) => t);
+    for (const g of fulls) {
+      const nb          = Math.max(1, g.jours);
+      const themeGroupe = `${g.theme}||${g.groupe}`;
+      let   placed      = false;
+      let   iter        = 0;
 
-    if (outOfRange > 0) {
-      showToast(`⚠ ${outOfRange} groupe(s) dépassent le ${fmt(wsEndDate)} — ${nLieux} lieu(x) · ${totalFiles} espace(s) parallèle(s). Élargissez l'intervalle ou augmentez la capacité des lieux.`, "error");
-    } else {
-      showToast(`✓ ${newTasks.length} groupe(s) planifiés — ${nLieux} lieu(x) · ${totalFiles} espace(s) parallèle(s)`, "success");
+      while (!placed && iter < MAX_ITER) {
+        iter++;
+        const fi               = bestFileIdx();
+        // S'assurer que le curseur est sur un jour libre (pas vacances, dans WS)
+        fileCursors[fi]        = findNextFreeDate(fileCursors[fi]);
+        const candidateStart   = fileCursors[fi];
+        // addWD saute déjà les weekends + fériés + vacances
+        const candidateEnd     = addWorkDays(candidateStart, nb - 1);
+
+        // Forcer placement même hors-range (sera signalé en conflit visuel)
+        if (candidateStart > wsEndDate) {
+          newTasks.push({
+            id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
+            group: g.theme, groupe: g.groupe,
+            start: candidateStart, end: candidateEnd,
+            halfDay: false, slot: null, _key: themeGroupe,
+          });
+          registerTask(lieuKey, themeGroupe, candidateStart, candidateEnd, false, null, g.candidatKeys);
+          fileCursors[fi] = findNextFreeDate(nextWD(candidateEnd));
+          placed = true;
+          break;
+        }
+
+        const lieuConflict  = hasLieuConflict(candidateStart, candidateEnd, false, null, lieuKey, nFiles);
+        const candConflict  = hasCandidatConflict(g.candidatKeys, themeGroupe, candidateStart, candidateEnd, false, null);
+
+        if (!lieuConflict && !candConflict) {
+          newTasks.push({
+            id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
+            group: g.theme, groupe: g.groupe,
+            start: candidateStart, end: candidateEnd,
+            halfDay: false, slot: null, _key: themeGroupe,
+          });
+          registerTask(lieuKey, themeGroupe, candidateStart, candidateEnd, false, null, g.candidatKeys);
+          fileCursors[fi] = findNextFreeDate(nextWD(candidateEnd));
+          placed = true;
+        } else {
+          // Conflit → avancer d'un jour ouvré (sauter weekends/fériés/vacances)
+          fileCursors[fi] = findNextFreeDate(nextWD(fileCursors[fi]));
+        }
+      }
     }
   }
 
-  // ── confirm ──────────────────────────────────────────────────────
-async function confirm() {
+  // ── 9. Planifier demi-journées avec gestion stricte AM/PM
+  for (const [lieuKey, { halves }] of Object.entries(byLieu)) {
+    let cursor = findNextFreeDate(startDay);
+
+    // Vérifie si un slot (matin ou après-midi) est libre sur une date
+    const isSlotFree = (date, slot) => {
+      const peers = plannedByLieu[lieuKey] || [];
+      return !peers.some(p => {
+        const overlap = p.start <= date && p.end >= date;
+        if (!overlap) return false;
+        // Un groupe full-day bloque tous les slots
+        if (!p.halfDay) return true;
+        // Un groupe half-day bloque seulement son slot
+        return p.slot === slot;
+      });
+    };
+
+    let i = 0;
+    let safety = 0;
+
+    while (i < halves.length && safety < MAX_ITER * halves.length) {
+      safety++;
+      cursor = findNextFreeDate(cursor); // garantit: ouvré + dans WS + pas en vacances
+
+      if (cursor > wsEndDate) {
+        // Placer hors-range
+        const g           = halves[i];
+        const themeGroupe = `${g.theme}||${g.groupe}`;
+        newTasks.push({
+          id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
+          group: g.theme, groupe: g.groupe,
+          start: cursor, end: cursor,
+          halfDay: true, slot: "matin", _key: themeGroupe,
+        });
+        registerTask(lieuKey, themeGroupe, cursor, cursor, true, "matin", g.candidatKeys);
+        i++;
+        cursor = findNextFreeDate(nextWD(cursor));
+        continue;
+      }
+
+      let placedOnThisDay = false;
+
+      for (const slot of ["matin", "après-midi"]) {
+        if (i >= halves.length) break;
+
+        if (!isSlotFree(cursor, slot)) continue;
+
+        const g           = halves[i];
+        const themeGroupe = `${g.theme}||${g.groupe}`;
+        const candConflict = hasCandidatConflict(
+          g.candidatKeys, themeGroupe, cursor, cursor, true, slot
+        );
+        if (candConflict) continue;
+
+        newTasks.push({
+          id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
+          group: g.theme, groupe: g.groupe,
+          start: cursor, end: cursor,
+          halfDay: true, slot, _key: themeGroupe,
+        });
+        registerTask(lieuKey, themeGroupe, cursor, cursor, true, slot, g.candidatKeys);
+        i++;
+        placedOnThisDay = true;
+      }
+
+      // Passer au jour suivant dans tous les cas
+      // (qu'on ait placé 0, 1 ou 2 groupes sur ce jour)
+      cursor = findNextFreeDate(nextWD(cursor));
+    }
+  }
+
+  // ── 10. Appliquer et notifier
+  let outOfRange = 0;
+  newTasks.forEach(t => { if (t.end > wsEndDate) outOfRange++; });
+
+  const nLieux     = Object.keys(byLieu).length;
+  const totalFiles = Object.values(byLieu).reduce((s, l) => s + Math.max(1, l.nbrEspace), 0);
+
+  const taskMap = {};
+  newTasks.forEach(t => { taskMap[t._key] = t; });
+
+  const updated = result.map(r => {
+    const t = taskMap[`${r.theme.trim()}||${r.groupe}`];
+    return {
+      ...r,
+      start:   t ? t.start   : r.start,
+      end:     t ? t.end     : r.end,
+      halfDay: t ? t.halfDay : (r.halfDay || false),
+      slot:    t ? t.slot    : (r.slot    || null),
+    };
+  });
+
+  setResult(updated);
+  setGanttDone(true);
+  batchTasksRef.current = newTasks.map(({ _key, ...t }) => t);
+
+  if (outOfRange > 0) {
+    showToast(
+      `⚠ ${outOfRange} groupe(s) dépassent le ${fmt(wsEndDate)} — ${nLieux} lieu(x) · ${totalFiles} espace(s). Élargissez l'intervalle.`,
+      "error"
+    );
+  } else {
+    showToast(
+      `✓ ${newTasks.length} groupe(s) planifiés — ${nLieux} lieu(x) · ${totalFiles} espace(s)`,
+      "success"
+    );
+  }
+}
+
+  async function confirm() {
   if (importing) return;
   setImporting(true);
 
@@ -5822,7 +6476,59 @@ async function confirm() {
     let finalCreatedDocs = [];
 
     if (wsId) {
-      // 3. Sauvegarder les tâches
+      // 3. Init multi-import
+      await apiFetch(`/workspaces/${wsId}/multi-import/init`, {
+        method: "POST",
+        body: {
+          batchId: batchId.current,
+          clearFormations: true,
+          clearCabinets: true
+        }
+      });
+
+      // 4. Formations et cabinets uniques
+      const uniqueFormations = [];
+      const uniqueCabinets = [];
+      const seenThemes = new Set();
+
+      result.forEach(r => {
+        const themeKey = r.theme.trim().toLowerCase();
+        if (!seenThemes.has(themeKey)) {
+          seenThemes.add(themeKey);
+          uniqueFormations.push({
+            intitule: r.theme,
+            domaine: r.domaine || "",
+            objectif: r.objectif || "",
+            contenu: r.contenu || "",
+            niveau: r.niveau || "",
+            publicCible: r.publicCible || ""
+          });
+          if (r.cabinet) {
+            uniqueCabinets.push({
+              intitule: r.theme,
+              cabinet: r.cabinet,
+              cnss: r.cnss || "",
+              lieu: r.lieu || "",
+              cout: r.cout || "",
+              formateur: r.formateur || "",
+              contact: r.contact || "",
+              nbrEspace: r.nbrEspace || 1
+            });
+          }
+        }
+      });
+
+      await apiFetch(`/workspaces/${wsId}/multi-import/formations`, {
+        method: "POST",
+        body: { batchId: batchId.current, formations: uniqueFormations }
+      });
+
+      await apiFetch(`/workspaces/${wsId}/multi-import/cabinets`, {
+        method: "POST",
+        body: { batchId: batchId.current, cabinets: uniqueCabinets }
+      });
+
+      // 5. Sauvegarder les tâches
       if (finalTasks.length > 0) {
         await apiFetch(`/workspaces/${wsId}/tasks/bulk`, {
           method: "POST",
@@ -5835,17 +6541,17 @@ async function confirm() {
         });
       }
 
-      // 4. Nettoyage des anciens candidats et documents
+      // 6. Nettoyage des anciens candidats et documents
       await apiFetch(`/workspaces/${wsId}/candidats`, { method: "DELETE" });
-      await apiFetch(`/workspaces/${wsId}/documents`, { method: "DELETE" }); 
+      await apiFetch(`/workspaces/${wsId}/documents`, { method: "DELETE" });
 
-      // 5. Importation des nouveaux candidats
+      // 7. Importation des nouveaux candidats
       await apiFetch(`/workspaces/${wsId}/candidats/import`, {
         method: "POST",
         body: { batchId: batchId.current, candidats: candidatsData },
       });
 
-      // 6. Génération des documents (Émargements + Fiches Techniques)
+      // 8. Génération des documents
       const attendanceDocs = finalTasks.map(t => ({
         nom: `Liste d'émargement - ${t.group} - G${t.groupe}`,
         type: "Émargement",
@@ -5865,98 +6571,95 @@ async function confirm() {
         nom: `Récapitulatif des actions de formation`,
         type: "Récapitulatif",
         statut: "En attente",
-        dateDoc: wsStart || new Date().toISOString().split('T')[0], // Date du début du projet
+        dateDoc: wsStart || new Date().toISOString().split('T')[0],
       };
 
       const syntheseDoc = {
-  nom: `Synthèse des coûts de formation`,
-  type: "Synthèse des coûts",
-  statut: "En attente",
-  dateDoc: wsStart || new Date().toISOString().split('T')[0],
-};
+        nom: `Synthèse des coûts de formation`,
+        type: "Synthèse des coûts",
+        statut: "En attente",
+        dateDoc: wsStart || new Date().toISOString().split('T')[0],
+      };
 
-const allDocsToCreate = [...attendanceDocs, ...ficheTechDocs, recapDoc, syntheseDoc];
-      // CRUCIAL : On crée tous les documents en parallèle et on récupère les données normalisées
-      const results = await Promise.all(
-        allDocsToCreate.map(d => 
+      const allDocsToCreate = [...attendanceDocs, ...ficheTechDocs, recapDoc, syntheseDoc];
+
+      // Création individuelle de chaque document
+      const docResults = await Promise.all(
+        allDocsToCreate.map(d =>
           apiFetch(`/workspaces/${wsId}/documents`, { method: "POST", body: d })
             .then(res => norm(res.data || res))
-            .catch(e => { console.warn("Erreur doc:", d.nom); return null; })
+            .catch(e => { console.warn("Erreur doc:", d.nom, e); return null; })
         )
       );
-      finalCreatedDocs = results.filter(Boolean);
+      finalCreatedDocs = docResults.filter(Boolean);
     }
 
     showToast(`${candidatsData.length} candidats importés`, "success");
 
-    // 7. Persister la base fusionnée en local pour l'export Excel ultérieur
-    // 7. Sauvegarder la base fusionnée en Base de Données
-try {
-  const exportBaseData = result.map(r => {
-    let creneauLabel = "Journée entière"; 
-  
-  if (r.halfDay) {
-    if (r.slot === "matin") creneauLabel = "AM";
-    else if (r.slot === "après-midi") creneauLabel = "PM";
-    else creneauLabel = "AM"; // Sécurité
-  } else {
-    // Force la valeur même si r.slot est vide
-    creneauLabel = "Journée entière";
-  }
+    // 9. Sauvegarder la base fusionnée en Base de Données
+    try {
+      const exportBaseData = result.map(r => {
+        let creneauLabel = "Journée entière";
 
-    return {
-      nom: r.nom,
-      prenom: r.prenom,
-      matricule: r.matricule || "",
-      theme: r.theme,
-      groupe: r.groupe,
-      heures: r.heures || 0,
-      jours: r.jours || 0,
-      halfDay: r.halfDay || false,
-      slot: creneauLabel,
-      dateDebut: r.start || "",
-      dateFin: r.end || "",
-      statut: r.statut || "Reçu",
-      departement: r.departement || "",
-      csp: r.csp || "",
-      domaine: r.domaine || "",
-      objectif: r.objectif || "",
-      contenu: r.contenu || "",
-      niveau: r.niveau || "",
-      publicCible: r.publicCible || "",
-      typeFormation: r.typeFormation || "",
-      cabinet: r.cabinet || "",
-      formateur: r.formateur || "",
-      lieu: r.lieu || "",
-      cout: r.cout || "",
-      cnss: r.cnss || "",
-      contact: r.contact || "",
-      nbrEspace: r.nbrEspace || 1,
-      ...(r.unmappedData || {}),
-    };
-  });
+        if (r.halfDay) {
+          if (r.slot === "matin") creneauLabel = "AM";
+          else if (r.slot === "après-midi") creneauLabel = "PM";
+          else creneauLabel = "AM";
+        } else {
+          creneauLabel = "Journée entière";
+        }
 
-  // Sauvegarde API
-  const updateRes = await apiFetch(`/workspaces/${wsId}/export-base`, {
-  method: "PATCH",
-  body: { 
-    exportBase: { 
-      rows: exportBaseData,
-      exportedAt: new Date().toISOString()
-    } 
-  }
-});
+        return {
+          nom: r.nom,
+          prenom: r.prenom,
+          matricule: r.matricule || "",
+          theme: r.theme,
+          groupe: r.groupe,
+          heures: r.heures || 0,
+          jours: r.jours || 0,
+          halfDay: r.halfDay || false,
+          slot: creneauLabel,
+          dateDebut: r.start || "",
+          dateFin: r.end || "",
+          statut: r.statut || "Reçu",
+          departement: r.departement || "",
+          csp: r.csp || "",
+          domaine: r.domaine || "",
+          objectif: r.objectif || "",
+          contenu: r.contenu || "",
+          niveau: r.niveau || "",
+          publicCible: r.publicCible || "",
+          typeFormation: r.typeFormation || "",
+          cabinet: r.cabinet || "",
+          formateur: r.formateur || "",
+          lieu: r.lieu || "",
+          cout: r.cout || "",
+          cnss: r.cnss || "",
+          contact: r.contact || "",
+          nbrEspace: r.nbrEspace || 1,
+          ...(r.unmappedData || {}),
+        };
+      });
 
-if (updateRes.data && onUpdateWs) {
-  // updateRes.data contient maintenant le workspace avec hasExportBase: true
-  onUpdateWs(updateRes.data); 
-}
-} catch (e) {
-  console.error("Erreur sauvegarde exportBase:", e.message);
-}
+      const updateRes = await apiFetch(`/workspaces/${wsId}/export-base`, {
+        method: "PATCH",
+        body: {
+          exportBase: {
+            rows: exportBaseData,
+            exportedAt: new Date().toISOString()
+          }
+        }
+      });
 
-    // 8. Finalisation : on envoie les candidats, les tâches ET les documents créés
-    onDone(candidatsData, finalTasks, finalCreatedDocs); 
+      if (updateRes.data && onUpdateWs) {
+        onUpdateWs(updateRes.data);
+      }
+    } catch (e) {
+      console.error("Erreur sauvegarde exportBase:", e.message);
+    }
+
+    // 10. Finalisation
+    onDone(candidatsData, finalTasks, finalCreatedDocs);
     onClose();
 
   } catch (e) {
@@ -5966,439 +6669,243 @@ if (updateRes.data && onUpdateWs) {
     setImporting(false);
   }
 }
-  // ── renderStatut (helper) ────────────────────────────────────────
+
   const renderStatut = (gr, cf, hasOverlap, hasSallePleine, hasHoliday, hasVac, hasHalfDayConflict, hasCandidatConflict, isOutOfRange, currentSlot) => {
-  
-  const conflictBtn = (label, color = "#d44c47") => (
-    <button
-      onClick={() => setConflictDetail(getConflictDetail(gr))}
-      style={{ display: "flex", alignItems: "center", gap: 4, background: "transparent", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
-      title="Cliquer pour voir le détail">
-      <AlertTriangle style={{ width: 12, height: 12, color, flexShrink: 0 }} />
-      <span style={{ fontSize: 10, fontWeight: 700, color, textDecoration: "underline dotted" }}>{label}</span>
-    </button>
-  );
+    const conflictBtn = (label, color = "#d44c47") => (
+      <button onClick={() => setConflictDetail(getConflictDetail(gr))} style={{ display: "flex", alignItems: "center", gap: 4, background: "transparent", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }} title="Cliquer pour voir le détail">
+        <AlertTriangle style={{ width: 12, height: 12, color, flexShrink: 0 }} />
+        <span style={{ fontSize: 10, fontWeight: 700, color, textDecoration: "underline dotted" }}>{label}</span>
+      </button>
+    );
+    if (isOutOfRange)        return conflictBtn("HORS PÉRIODE");
+    if (hasHalfDayConflict)  return conflictBtn(currentSlot === "matin" ? "AM DÉJÀ PRIS" : "PM DÉJÀ PRIS");
+    if (hasSallePleine)      return conflictBtn("SALLE PLEINE");
+    if (hasOverlap)          return conflictBtn("CHEVAUCHEMENT");
+    if (hasCandidatConflict) return conflictBtn("CANDIDAT DOUBLE");
+    if (hasVac)              return conflictBtn("CONGÉ", "#337ea9");
+    if (hasHoliday)          return conflictBtn("FÉRIÉ", "#448361");
+    if (gr.start) return (
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <Check style={{ width: 12, height: 12, color: "#448361" }} />
+        <span style={{ fontSize: 10, color: "#448361" }}>{gr.halfDay ? `OK — ${currentSlot === "matin" ? "Matin" : "Après-midi"}` : "OK"}</span>
+      </div>
+    );
+    return <span style={{ fontSize: 10, color: T.pageTer }}>À planifier</span>;
+  };
 
-  if (isOutOfRange)          return conflictBtn("HORS PÉRIODE");
-  if (hasHalfDayConflict)    return conflictBtn(currentSlot === "matin" ? "AM DÉJÀ PRIS" : "PM DÉJÀ PRIS");
-  if (hasSallePleine)        return conflictBtn("SALLE PLEINE");
-  if (hasOverlap)            return conflictBtn("CHEVAUCHEMENT");
-  if (hasCandidatConflict)   return conflictBtn("CANDIDAT DOUBLE");
-  if (hasVac)                return conflictBtn("CONGÉ", "#337ea9");
-  if (hasHoliday)            return conflictBtn("FÉRIÉ", "#448361");
-
-  if (gr.start) return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      <Check style={{ width: 12, height: 12, color: "#448361" }} />
-      <span style={{ fontSize: 10, color: "#448361" }}>
-        {gr.halfDay ? `OK — ${currentSlot === "matin" ? "Matin" : "Après-midi"}` : "OK"}
-      </span>
-    </div>
-  );
-  return <span style={{ fontSize: 10, color: T.pageTer }}>À planifier</span>;
-};
-
-// APRÈS
-
-
-  // ── renderCell (helper tableau step 10) ─────────────────────────
   const renderCell = (key, gr, cf, hasOverlap, hasSallePleine, hasHoliday, hasVac, hasHalfDayConflict, hasCandidatConflict, isOutOfRange, currentSlot) => {
     switch (key) {
-      case "theme":
-        return (
-          <td key={key} style={{ ...tdS, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            <Tag label={gr.theme} scheme={grpTag(gr.theme)} />
-          </td>
-        );
-      case "groupe":
-        return <td key={key} style={{ ...tdS, textAlign: "center", fontWeight: 700, color: T.accent }}>G{gr.groupe}</td>;
-      case "count":
-        return <td key={key} style={{ ...tdS, textAlign: "center" }}><span style={{ fontSize: 11, color: T.pageSub }}>{gr.count} pers.</span></td>;
-      case "duree":
-        return (
-          <td key={key} style={{ ...tdS, fontSize: 11 }}>
-            {gr.halfDay ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <span style={{ fontFamily: "monospace", color: T.pageSub }}>½ j</span>
-                <div style={{ display: "flex", borderRadius: 4, border: `1px solid ${hasHalfDayConflict ? "#d44c47" : T.pageBdr}`, overflow: "hidden" }}>
-                  {[["AM", "matin"], ["PM", "après-midi"]].map(([label, val]) => {
-                    const active = currentSlot === val;
-                    return (
-                      <button key={val} onClick={() => updateGroupDates(gr.key, "slot", val)}
-                        style={{ padding: "2px 7px", fontSize: 10, fontWeight: active ? 700 : 400, border: "none", borderRight: val === "matin" ? `1px solid ${T.pageBdr}` : "none", background: active ? (hasHalfDayConflict ? "rgba(212,76,71,0.15)" : "rgba(55,53,47,0.12)") : "#fff", color: active ? (hasHalfDayConflict ? "#d44c47" : T.pageText) : T.pageTer, cursor: "pointer", fontFamily: "inherit" }}>
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
+      case "theme": return <td key={key} style={{ ...tdS, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><Tag label={gr.theme} scheme={grpTag(gr.theme)} /></td>;
+      case "groupe": return <td key={key} style={{ ...tdS, textAlign: "center", fontWeight: 700, color: T.accent }}>G{gr.groupe}</td>;
+      case "count": return <td key={key} style={{ ...tdS, textAlign: "center" }}><span style={{ fontSize: 11, color: T.pageSub }}>{gr.count} pers.</span></td>;
+      case "duree": return (
+        <td key={key} style={{ ...tdS, fontSize: 11 }}>
+          {gr.halfDay ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ fontFamily: "monospace", color: T.pageSub }}>½ j</span>
+              <div style={{ display: "flex", borderRadius: 4, border: `1px solid ${hasHalfDayConflict ? "#d44c47" : T.pageBdr}`, overflow: "hidden" }}>
+                {[["AM", "matin"], ["PM", "après-midi"]].map(([label, val]) => {
+                  const active = currentSlot === val;
+                  return <button key={val} onClick={() => updateGroupDates(gr.key, "slot", val)} style={{ padding: "2px 7px", fontSize: 10, fontWeight: active ? 700 : 400, border: "none", borderRight: val === "matin" ? `1px solid ${T.pageBdr}` : "none", background: active ? (hasHalfDayConflict ? "rgba(212,76,71,0.15)" : "rgba(55,53,47,0.12)") : "#fff", color: active ? (hasHalfDayConflict ? "#d44c47" : T.pageText) : T.pageTer, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>;
+                })}
               </div>
-            ) : (
-              <span style={{ fontFamily: "monospace", color: T.pageSub }}>{gr.jours} j</span>
-            )}
-          </td>
-        );
-      case "start":
-  return (
-    <td key={key} style={{ ...tdS, padding: "4px 8px" }}>
-      <RichDatePicker
-        value={gr.start || ""}
-        onChange={val => updateGroupDates(gr.key, "start", val)}
-        wd={wd} sh={sh} vacs={vacs}
-        groupRows={groupRows}
-        currentKey={gr.key}
-        hasPreDates={gr.hasPreDates}   // ← AJOUTER
-      />
-    </td>
-  );
-
-case "end":
-  return (
-    <td key={key} style={{ ...tdS, padding: "4px 8px" }}>
-      {gr.halfDay
-        ? <span style={{ fontSize: 11, color: T.pageTer, fontStyle: "italic" }}>= Début</span>
-        : gr.jours <= 1
-          ? (
-            <RichDatePicker
-              value={gr.end || gr.start || ""}
-              onChange={() => {}}
-              min={gr.start || undefined}
-              wd={wd} sh={sh} vacs={vacs}
-              groupRows={groupRows}
-              currentKey={gr.key}
-              disabled={true}
-              hasPreDates={gr.hasPreDates}   // ← AJOUTER
-            />
-          )
-          : (
-            <RichDatePicker
-              value={gr.end || ""}
-              onChange={val => updateGroupDates(gr.key, "end", val)}
-              min={gr.start || undefined}
-              wd={wd} sh={sh} vacs={vacs}
-              groupRows={groupRows}
-              currentKey={gr.key}
-              disabled={false}
-              hasPreDates={gr.hasPreDates}   // ← AJOUTER
-            />
-          )
-      }
-    </td>
-  );
-      case "statut":
-        return (
-          <td key={key} style={{ ...tdS, minWidth: 140 }}>
-            {renderStatut(gr, cf, hasOverlap, hasSallePleine, hasHoliday, hasVac, hasHalfDayConflict, hasCandidatConflict, isOutOfRange, currentSlot)}
-          </td>
-        );
-      default:
-        return (
-          <td key={key} style={{ ...tdS, fontSize: 11, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={gr[key] || ""}>
-            {gr[key] ? <span style={{ color: T.pageText }}>{gr[key]}</span> : <span style={{ color: T.pageTer, fontStyle: "italic" }}>—</span>}
-          </td>
-        );
+            </div>
+          ) : <span style={{ fontFamily: "monospace", color: T.pageSub }}>{gr.jours} j</span>}
+        </td>
+      );
+      case "start": return (
+        <td key={key} style={{ ...tdS, padding: "4px 8px" }}>
+          <RichDatePicker value={gr.start || ""} onChange={val => updateGroupDates(gr.key, "start", val)} wd={wd} sh={sh} vacs={vacs} groupRows={groupRows} currentKey={gr.key} hasPreDates={gr.hasPreDates} />
+        </td>
+      );
+      case "end": return (
+        <td key={key} style={{ ...tdS, padding: "4px 8px" }}>
+          {gr.halfDay
+            ? <span style={{ fontSize: 11, color: T.pageTer, fontStyle: "italic" }}>= Début</span>
+            : gr.jours <= 1
+              ? <RichDatePicker value={gr.end || gr.start || ""} onChange={() => {}} min={gr.start || undefined} wd={wd} sh={sh} vacs={vacs} groupRows={groupRows} currentKey={gr.key} disabled={true} hasPreDates={gr.hasPreDates} />
+              : <RichDatePicker value={gr.end || ""} onChange={val => updateGroupDates(gr.key, "end", val)} min={gr.start || undefined} wd={wd} sh={sh} vacs={vacs} groupRows={groupRows} currentKey={gr.key} disabled={false} hasPreDates={gr.hasPreDates} />
+          }
+        </td>
+      );
+      case "statut": return <td key={key} style={{ ...tdS, minWidth: 140 }}>{renderStatut(gr, cf, hasOverlap, hasSallePleine, hasHoliday, hasVac, hasHalfDayConflict, hasCandidatConflict, isOutOfRange, currentSlot)}</td>;
+      default: return <td key={key} style={{ ...tdS, fontSize: 11, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={gr[key] || ""}>{gr[key] ? <span style={{ color: T.pageText }}>{gr[key]}</span> : <span style={{ color: T.pageTer, fontStyle: "italic" }}>—</span>}</td>;
     }
   };
-  
-const handleSafeClose = () => {
-  // On demande confirmation si des fichiers sont chargés ou si on a dépassé l'étape 1
-  if (step > 1 || base1.fileName || base2.fileName || base3.fileName) {
-    setShowConfirm(true);
-  } else {
-    onClose();
-  }
-};
+
+  const handleSafeClose = () => {
+    if (step > 1 || base1.fileName || base2.fileName || base3.fileName) setShowConfirm(true);
+    else onClose();
+  };
+
   // ════════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════════
   return (
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 650, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      onMouseDown={e => { if (e.target === e.currentTarget) handleSafeClose(); }}
-    >
+    <div style={{ position: "fixed", inset: 0, zIndex: 650, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onMouseDown={e => { if (e.target === e.currentTarget) handleSafeClose(); }}>
       {showConfirm && (
-      <ConfirmModal 
-        title="Arrêter l'importation ?"
-        message="Vous allez perdre toute votre progression et les fichiers chargés. Voulez-vous vraiment quitter ?"
-        confirmLabel="Arrêter l'import"
-        cancelLabel="Continuer l'import"
-        onConfirm={onClose} // Ferme réellement le modal
-        onCancel={() => setShowConfirm(false)} // Ferme juste l'alerte
-      />
-    )}
-
+        <ConfirmModal title="Arrêter l'importation ?" message="Vous allez perdre toute votre progression et les fichiers chargés. Voulez-vous vraiment quitter ?" confirmLabel="Arrêter l'import" cancelLabel="Continuer l'import" onConfirm={onClose} onCancel={() => setShowConfirm(false)} />
+      )}
       <div style={{ background: "#fff", borderRadius: 8, width: "min(1150px,98vw)", maxHeight: "94vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", border: `1px solid rgba(55,53,47,0.12)` }}>
-{/* ── Modal détail conflit ── */}
-{conflictDetail && (
-  <div
-    style={{ position: "fixed", inset: 0, zIndex: 800, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-    onMouseDown={e => { if (e.target === e.currentTarget) setConflictDetail(null); }}>
-    <div style={{ background: "#fff", borderRadius: 8, width: "min(640px,96vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", border: `1px solid rgba(55,53,47,0.12)` }}>
 
-      {/* Header */}
-      <div style={{ padding: "14px 18px 12px", borderBottom: `1px solid ${T.pageBdr}`, display: "flex", alignItems: "flex-start", gap: 10, flexShrink: 0 }}>
-        <div style={{ width: 30, height: 30, borderRadius: 6, background: `${conflictDetail.color}15`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
-          <AlertTriangle style={{ width: 14, height: 14, color: conflictDetail.color }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: T.pageText }}>{conflictDetail.title}</div>
-          <div style={{ fontSize: 11, color: T.pageSub, marginTop: 2 }}>
-            {conflictDetail.key.split("||")[0]} — G{conflictDetail.key.split("||")[1]}
-          </div>
-        </div>
-        <button onClick={() => { setConflictDetail(null); setConflictEdit({}); }}
-          style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", cursor: "pointer", color: T.pageSub, flexShrink: 0 }}>
-          <X style={{ width: 13, height: 13 }} />
-        </button>
-      </div>
-
-      {/* Body */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
-
-        {conflictDetail.type === "candidat_double" && (
-  <>
-    <div style={{ fontSize: 12, color: T.pageSub, marginBottom: 4 }}>
-      {conflictDetail.items.length} candidat{conflictDetail.items.length > 1 ? "s" : ""} inscrit{conflictDetail.items.length > 1 ? "s" : ""} simultanément sur plusieurs formations :
-    </div>
-    <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ background: "rgba(55,53,47,0.03)" }}>
-            {["Candidat", "Aussi inscrit dans", "Période ici", "Période là-bas", "Action"].map(h => (
-              <th key={h} style={{ padding: "6px 10px", fontSize: 10, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "left", borderBottom: `1px solid ${T.pageBdr}` }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {conflictDetail.items.map((item, i) => {
-            // Clé unique pour ce candidat dans cet item
-            const editKey   = `${i}__${item.candidat}`;
-            const isEditing = !!conflictEdit[editKey];
-
-            // Groupes disponibles pour la formation "aussi inscrit dans"
-            // ex: "ATEX — G1" → theme="ATEX", on liste tous les groupes de ce thème
-            const otherTheme  = item.conflictWith.split(" — ")[0]?.trim();
-            const otherGroupe = item.conflictWith.split(" — G")[1]?.trim();
-            const thisTheme   = conflictDetail.key.split("||")[0];
-            const thisGroupe  = conflictDetail.key.split("||")[1];
-
-            // Tous les groupes existants pour la formation en conflit
-            const otherGroupeOptions = [...new Set(
-              result
-                .filter(r => r.theme.trim() === otherTheme)
-                .map(r => String(r.groupe))
-            )].sort((a, b) => Number(a) - Number(b));
-
-            // Tous les groupes existants pour CE groupe (formation actuelle)
-            const thisGroupeOptions = [...new Set(
-              result
-                .filter(r => r.theme.trim() === thisTheme)
-                .map(r => String(r.groupe))
-            )].sort((a, b) => Number(a) - Number(b));
-
-            const editVal = conflictEdit[editKey] || { targetFormation: "other", newGroupe: otherGroupe };
-
-            return (
-              <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "rgba(55,53,47,0.015)", borderLeft: `3px solid #d44c47`, verticalAlign: "top" }}>
-                <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 600, color: T.pageText, borderBottom: `1px solid ${T.pageBdr}` }}>
-                  {item.candidat}
-                </td>
-                <td style={{ padding: "8px 10px", fontSize: 12, color: "#d44c47", fontWeight: 500, borderBottom: `1px solid ${T.pageBdr}` }}>
-                  {item.conflictWith}
-                </td>
-                <td style={{ padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>
-                  {item.periode}
-                </td>
-                <td style={{ padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>
-                  {item.periodeOther}
-                </td>
-
-                {/* ── Colonne Action ── */}
-                <td style={{ padding: "8px 10px", borderBottom: `1px solid ${T.pageBdr}`, minWidth: 200 }}>
-                  {!isEditing ? (
-                    <button
-                      onClick={() => setConflictEdit(p => ({ ...p, [editKey]: { targetFormation: "other", newGroupe: otherGroupe } }))}
-                      style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", fontSize: 11, fontWeight: 600, color: T.accent, background: `${T.accent}0d`, border: `1px solid ${T.accent}30`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                      <UserCog style={{ width: 11, height: 11 }} />
-                      Changer de groupe
-                    </button>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-
-                      {/* Choix : modifier dans quelle formation */}
-                      <div style={{ fontSize: 10, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                        Modifier le groupe dans :
-                      </div>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        {[
-                          { val: "here",  label: thisTheme.length > 18 ? thisTheme.slice(0,18)+"…" : thisTheme,  full: thisTheme  },
-                          { val: "other", label: otherTheme.length > 18 ? otherTheme.slice(0,18)+"…" : otherTheme, full: otherTheme },
-                        ].map(opt => (
-                          <button key={opt.val}
-                            title={opt.full}
-                            onClick={() => setConflictEdit(p => ({
-                              ...p,
-                              [editKey]: {
-                                targetFormation: opt.val,
-                                newGroupe: opt.val === "here" ? thisGroupe : otherGroupe,
-                              }
-                            }))}
-                            style={{
-                              flex: 1, padding: "3px 6px", fontSize: 10, fontWeight: 600, borderRadius: 3, cursor: "pointer", fontFamily: "inherit", border: "none",
-                              background: editVal.targetFormation === opt.val ? T.accent : "rgba(55,53,47,0.07)",
-                              color:      editVal.targetFormation === opt.val ? "#fff" : T.pageSub,
-                            }}>
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Sélection du nouveau groupe */}
-                      <div style={{ fontSize: 10, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                        Nouveau groupe :
-                      </div>
-                      <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-                        {(editVal.targetFormation === "here" ? thisGroupeOptions : otherGroupeOptions).map(g => (
-                          <button key={g}
-                            onClick={() => setConflictEdit(p => ({ ...p, [editKey]: { ...editVal, newGroupe: g } }))}
-                            style={{
-                              padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 3, cursor: "pointer", fontFamily: "inherit", border: "none",
-                              background: editVal.newGroupe === g ? T.accent : "rgba(55,53,47,0.07)",
-                              color:      editVal.newGroupe === g ? "#fff" : T.pageText,
-                            }}>
-                            G{g}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Boutons confirmer / annuler */}
-                      <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
-                        <button
-                          onClick={() => {
-                            // Extraire le nom/matricule depuis item.candidat
-                            // format : "NOM Prénom (MAT)" ou "NOM Prénom"
-                            const matMatch = item.candidat.match(/\(([^)]+)\)$/);
-                            const mat      = matMatch ? matMatch[1].trim() : "";
-                            const nomPrenom = item.candidat.replace(/\s*\([^)]+\)$/, "").trim();
-                            const [nom, ...prenomParts] = nomPrenom.split(" ");
-                            const prenom = prenomParts.join(" ");
-
-                            const targetTheme = editVal.targetFormation === "here" ? thisTheme : otherTheme;
-                            const currentGrp  = editVal.targetFormation === "here" ? Number(thisGroupe) : Number(otherGroupe);
-                            const newGrp      = Number(editVal.newGroupe);
-
-                            if (currentGrp === newGrp) {
-                              setConflictEdit(p => { const n = { ...p }; delete n[editKey]; return n; });
-                              return;
-                            }
-
-                            // Mettre à jour result
-                            setResult(prev => prev.map(r => {
-                              const sameTheme = r.theme.trim() === targetTheme;
-                              const sameGrp   = Number(r.groupe) === currentGrp;
-                              if (!sameTheme || !sameGrp) return r;
-                              // Identifier le candidat
-                              const rMat = (r.matricule || "").trim();
-                              const matchByMat  = mat && rMat.toLowerCase() === mat.toLowerCase();
-                              const matchByName = !mat && r.nom.toLowerCase() === nom.toLowerCase() && r.prenom.toLowerCase() === prenom.toLowerCase();
-                              if (!matchByMat && !matchByName) return r;
-                              return { ...r, groupe: newGrp };
-                            }));
-
-                            setConflictEdit(p => { const n = { ...p }; delete n[editKey]; return n; });
-                            setGanttDone(false);
-                          }}
-                          style={{ flex: 1, padding: "4px 0", fontSize: 11, fontWeight: 700, color: "#fff", background: "#37352f", border: "none", borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>
-                          ✓ Appliquer
-                        </button>
-                        <button
-                          onClick={() => setConflictEdit(p => { const n = { ...p }; delete n[editKey]; return n; })}
-                          style={{ flex: 1, padding: "4px 0", fontSize: 11, color: T.pageSub, background: "transparent", border: `1px solid ${T.pageBdr}`, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>
-                          Annuler
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  </>
-)}
-
-        {(conflictDetail.type === "overlap" || conflictDetail.type === "salle_pleine") && (
-          <>
-            <div style={{ fontSize: 12, color: T.pageSub, marginBottom: 4 }}>
-              {conflictDetail.items.length} groupe{conflictDetail.items.length > 1 ? "s" : ""} en chevauchement sur le même lieu/créneau :
-            </div>
-            <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ background: "rgba(55,53,47,0.03)" }}>
-                    {["Groupe en conflit", "Période ce groupe", "Période autre groupe", "Lieu", conflictDetail.type === "salle_pleine" ? "Simultanés / Capacité" : ""].filter(Boolean).map(h => (
-                      <th key={h} style={{ padding: "6px 10px", fontSize: 10, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "left", borderBottom: `1px solid ${T.pageBdr}` }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {conflictDetail.items.map((item, i) => (
-                    <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "rgba(55,53,47,0.015)", borderLeft: `3px solid #d44c47` }}>
-                      <td style={{ padding: "7px 10px", fontSize: 12, fontWeight: 600, color: "#d44c47", borderBottom: `1px solid ${T.pageBdr}` }}>{item.conflictWith}</td>
-                      <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "monospace", color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>{item.periode}</td>
-                      <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "monospace", color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>{item.periodeOther}</td>
-                      <td style={{ padding: "7px 10px", fontSize: 11, color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>{item.lieu}</td>
-                      {conflictDetail.type === "salle_pleine" && (
-                        <td style={{ padding: "7px 10px", fontSize: 11, fontWeight: 700, color: "#d44c47", borderBottom: `1px solid ${T.pageBdr}` }}>
-                          {item.simultanes} / {item.capacite}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-
-        {(conflictDetail.type === "hors_periode" || conflictDetail.type === "halfday" || conflictDetail.type === "holiday" || conflictDetail.type === "vacation") && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {conflictDetail.items.map((item, i) => (
-              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, padding: "10px 14px", borderRadius: 6, border: `1px solid ${conflictDetail.color}25`, background: `${conflictDetail.color}06`, borderLeft: `3px solid ${conflictDetail.color}` }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.pageText }}>{item.conflictWith}</div>
-                <div style={{ fontSize: 12, color: T.pageSub }}>{item.periode}</div>
-                {item.periodeOther && <div style={{ fontSize: 12, color: conflictDetail.color, fontWeight: 500 }}>{item.periodeOther}</div>}
+        {/* ── Modal détail conflit ── */}
+        {conflictDetail && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 800, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onMouseDown={e => { if (e.target === e.currentTarget) setConflictDetail(null); }}>
+            <div style={{ background: "#fff", borderRadius: 8, width: "min(640px,96vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", border: `1px solid rgba(55,53,47,0.12)` }}>
+              <div style={{ padding: "14px 18px 12px", borderBottom: `1px solid ${T.pageBdr}`, display: "flex", alignItems: "flex-start", gap: 10, flexShrink: 0 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 6, background: `${conflictDetail.color}15`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                  <AlertTriangle style={{ width: 14, height: 14, color: conflictDetail.color }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.pageText }}>{conflictDetail.title}</div>
+                  <div style={{ fontSize: 11, color: T.pageSub, marginTop: 2 }}>{conflictDetail.key.split("||")[0]} — G{conflictDetail.key.split("||")[1]}</div>
+                </div>
+                <button onClick={() => { setConflictDetail(null); setConflictEdit({}); }} style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", cursor: "pointer", color: T.pageSub, flexShrink: 0 }}>
+                  <X style={{ width: 13, height: 13 }} />
+                </button>
               </div>
-            ))}
+              <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+                {conflictDetail.type === "candidat_double" && (
+                  <>
+                    <div style={{ fontSize: 12, color: T.pageSub, marginBottom: 4 }}>{conflictDetail.items.length} candidat{conflictDetail.items.length > 1 ? "s" : ""} inscrit{conflictDetail.items.length > 1 ? "s" : ""} simultanément sur plusieurs formations :</div>
+                    <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ background: "rgba(55,53,47,0.03)" }}>
+                            {["Candidat", "Aussi inscrit dans", "Période ici", "Période là-bas", "Action"].map(h => (
+                              <th key={h} style={{ padding: "6px 10px", fontSize: 10, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "left", borderBottom: `1px solid ${T.pageBdr}` }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {conflictDetail.items.map((item, i) => {
+                            const editKey = `${i}__${item.candidat}`;
+                            const isEditing = !!conflictEdit[editKey];
+                            const otherTheme = item.conflictWith.split(" — ")[0]?.trim();
+                            const otherGroupe = item.conflictWith.split(" — G")[1]?.trim();
+                            const thisTheme = conflictDetail.key.split("||")[0];
+                            const thisGroupe = conflictDetail.key.split("||")[1];
+                            const otherGroupeOptions = [...new Set(result.filter(r => r.theme.trim() === otherTheme).map(r => String(r.groupe)))].sort((a, b) => Number(a) - Number(b));
+                            const thisGroupeOptions = [...new Set(result.filter(r => r.theme.trim() === thisTheme).map(r => String(r.groupe)))].sort((a, b) => Number(a) - Number(b));
+                            const editVal = conflictEdit[editKey] || { targetFormation: "other", newGroupe: otherGroupe };
+                            return (
+                              <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "rgba(55,53,47,0.015)", borderLeft: `3px solid #d44c47`, verticalAlign: "top" }}>
+                                <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 600, color: T.pageText, borderBottom: `1px solid ${T.pageBdr}` }}>{item.candidat}</td>
+                                <td style={{ padding: "8px 10px", fontSize: 12, color: "#d44c47", fontWeight: 500, borderBottom: `1px solid ${T.pageBdr}` }}>{item.conflictWith}</td>
+                                <td style={{ padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>{item.periode}</td>
+                                <td style={{ padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>{item.periodeOther}</td>
+                                <td style={{ padding: "8px 10px", borderBottom: `1px solid ${T.pageBdr}`, minWidth: 200 }}>
+                                  {!isEditing ? (
+                                    <button onClick={() => setConflictEdit(p => ({ ...p, [editKey]: { targetFormation: "other", newGroupe: otherGroupe } }))} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", fontSize: 11, fontWeight: 600, color: T.accent, background: `${T.accent}0d`, border: `1px solid ${T.accent}30`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                                      <UserCog style={{ width: 11, height: 11 }} /> Changer de groupe
+                                    </button>
+                                  ) : (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                      <div style={{ fontSize: 10, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.04em" }}>Modifier le groupe dans :</div>
+                                      <div style={{ display: "flex", gap: 4 }}>
+                                        {[{ val: "here", label: thisTheme.length > 18 ? thisTheme.slice(0, 18) + "…" : thisTheme, full: thisTheme }, { val: "other", label: otherTheme.length > 18 ? otherTheme.slice(0, 18) + "…" : otherTheme, full: otherTheme }].map(opt => (
+                                          <button key={opt.val} title={opt.full} onClick={() => setConflictEdit(p => ({ ...p, [editKey]: { targetFormation: opt.val, newGroupe: opt.val === "here" ? thisGroupe : otherGroupe } }))} style={{ flex: 1, padding: "3px 6px", fontSize: 10, fontWeight: 600, borderRadius: 3, cursor: "pointer", fontFamily: "inherit", border: "none", background: editVal.targetFormation === opt.val ? T.accent : "rgba(55,53,47,0.07)", color: editVal.targetFormation === opt.val ? "#fff" : T.pageSub }}>{opt.label}</button>
+                                        ))}
+                                      </div>
+                                      <div style={{ fontSize: 10, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.04em" }}>Nouveau groupe :</div>
+                                      <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+                                        {(editVal.targetFormation === "here" ? thisGroupeOptions : otherGroupeOptions).map(g => (
+                                          <button key={g} onClick={() => setConflictEdit(p => ({ ...p, [editKey]: { ...editVal, newGroupe: g } }))} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 3, cursor: "pointer", fontFamily: "inherit", border: "none", background: editVal.newGroupe === g ? T.accent : "rgba(55,53,47,0.07)", color: editVal.newGroupe === g ? "#fff" : T.pageText }}>G{g}</button>
+                                        ))}
+                                      </div>
+                                      <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
+                                        <button onClick={() => {
+                                          const matMatch = item.candidat.match(/\(([^)]+)\)$/);
+                                          const mat = matMatch ? matMatch[1].trim() : "";
+                                          const nomPrenom = item.candidat.replace(/\s*\([^)]+\)$/, "").trim();
+                                          const [nom, ...prenomParts] = nomPrenom.split(" ");
+                                          const prenom = prenomParts.join(" ");
+                                          const targetTheme = editVal.targetFormation === "here" ? thisTheme : otherTheme;
+                                          const currentGrp = editVal.targetFormation === "here" ? Number(thisGroupe) : Number(otherGroupe);
+                                          const newGrp = Number(editVal.newGroupe);
+                                          if (currentGrp === newGrp) { setConflictEdit(p => { const n = { ...p }; delete n[editKey]; return n; }); return; }
+                                          setResult(prev => prev.map(r => {
+                                            if (r.theme.trim() !== targetTheme || Number(r.groupe) !== currentGrp) return r;
+                                            const rMat = (r.matricule || "").trim();
+                                            const matchByMat = mat && rMat.toLowerCase() === mat.toLowerCase();
+                                            const matchByName = !mat && r.nom.toLowerCase() === nom.toLowerCase() && r.prenom.toLowerCase() === prenom.toLowerCase();
+                                            if (!matchByMat && !matchByName) return r;
+                                            return { ...r, groupe: newGrp };
+                                          }));
+                                          setConflictEdit(p => { const n = { ...p }; delete n[editKey]; return n; });
+                                          setGanttDone(false);
+                                        }} style={{ flex: 1, padding: "4px 0", fontSize: 11, fontWeight: 700, color: "#fff", background: "#37352f", border: "none", borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>✓ Appliquer</button>
+                                        <button onClick={() => setConflictEdit(p => { const n = { ...p }; delete n[editKey]; return n; })} style={{ flex: 1, padding: "4px 0", fontSize: 11, color: T.pageSub, background: "transparent", border: `1px solid ${T.pageBdr}`, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>Annuler</button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+                {(conflictDetail.type === "overlap" || conflictDetail.type === "salle_pleine") && (
+                  <>
+                    <div style={{ fontSize: 12, color: T.pageSub, marginBottom: 4 }}>{conflictDetail.items.length} groupe{conflictDetail.items.length > 1 ? "s" : ""} en chevauchement sur le même lieu/créneau :</div>
+                    <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ background: "rgba(55,53,47,0.03)" }}>
+                            {["Groupe en conflit", "Période ce groupe", "Période autre groupe", "Lieu", conflictDetail.type === "salle_pleine" ? "Simultanés / Capacité" : ""].filter(Boolean).map(h => (
+                              <th key={h} style={{ padding: "6px 10px", fontSize: 10, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "left", borderBottom: `1px solid ${T.pageBdr}` }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {conflictDetail.items.map((item, i) => (
+                            <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "rgba(55,53,47,0.015)", borderLeft: `3px solid #d44c47` }}>
+                              <td style={{ padding: "7px 10px", fontSize: 12, fontWeight: 600, color: "#d44c47", borderBottom: `1px solid ${T.pageBdr}` }}>{item.conflictWith}</td>
+                              <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "monospace", color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>{item.periode}</td>
+                              <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "monospace", color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>{item.periodeOther}</td>
+                              <td style={{ padding: "7px 10px", fontSize: 11, color: T.pageSub, borderBottom: `1px solid ${T.pageBdr}` }}>{item.lieu}</td>
+                              {conflictDetail.type === "salle_pleine" && <td style={{ padding: "7px 10px", fontSize: 11, fontWeight: 700, color: "#d44c47", borderBottom: `1px solid ${T.pageBdr}` }}>{item.simultanes} / {item.capacite}</td>}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+                {(conflictDetail.type === "hors_periode" || conflictDetail.type === "halfday" || conflictDetail.type === "holiday" || conflictDetail.type === "vacation") && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {conflictDetail.items.map((item, i) => (
+                      <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, padding: "10px 14px", borderRadius: 6, border: `1px solid ${conflictDetail.color}25`, background: `${conflictDetail.color}06`, borderLeft: `3px solid ${conflictDetail.color}` }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: T.pageText }}>{item.conflictWith}</div>
+                        <div style={{ fontSize: 12, color: T.pageSub }}>{item.periode}</div>
+                        {item.periodeOther && <div style={{ fontSize: 12, color: conflictDetail.color, fontWeight: 500 }}>{item.periodeOther}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ marginTop: 8, padding: "10px 14px", borderRadius: 6, background: "rgba(55,53,47,0.03)", border: `1px solid ${T.pageBdr}`, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <div style={{ fontSize: 18, flexShrink: 0 }}>💡</div>
+                  <div style={{ fontSize: 12, color: T.pageSub, lineHeight: 1.6 }}>
+                    {conflictDetail.type === "candidat_double" && "Modifiez les dates d'un des groupes pour éviter le chevauchement, ou vérifiez si le candidat doit bien être inscrit aux deux formations."}
+                    {conflictDetail.type === "salle_pleine" && "Augmentez la capacité du lieu (champ « Nbr d'espace ») dans la Base Cabinets, ou décalez les dates d'un des groupes."}
+                    {conflictDetail.type === "overlap" && "Décalez la date de début de ce groupe pour éviter le chevauchement sur le même lieu."}
+                    {conflictDetail.type === "hors_periode" && "Avancez la date de fin du groupe ou élargissez la période du workspace, puis régénérez la planification."}
+                    {conflictDetail.type === "halfday" && "Changez le créneau (Matin / Après-midi) de l'un des groupes, ou décalez la date."}
+                    {conflictDetail.type === "holiday" && "Cliquez sur Régénérer pour recalculer les dates en excluant les jours fériés."}
+                    {conflictDetail.type === "vacation" && "Cliquez sur Régénérer pour recalculer les dates en excluant cette période de congé."}
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: "10px 18px", borderTop: `1px solid ${T.pageBdr}`, display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
+                <button onClick={() => { setConflictDetail(null); setConflictEdit({}); }} style={{ padding: "6px 18px", fontSize: 13, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Fermer</button>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* Suggestion d'action */}
-        <div style={{ marginTop: 8, padding: "10px 14px", borderRadius: 6, background: "rgba(55,53,47,0.03)", border: `1px solid ${T.pageBdr}`, display: "flex", alignItems: "flex-start", gap: 8 }}>
-          <div style={{ fontSize: 18, flexShrink: 0 }}>💡</div>
-          <div style={{ fontSize: 12, color: T.pageSub, lineHeight: 1.6 }}>
-            {conflictDetail.type === "candidat_double" && "Modifiez les dates d'un des groupes pour éviter le chevauchement, ou vérifiez si le candidat doit bien être inscrit aux deux formations."}
-            {conflictDetail.type === "salle_pleine"    && "Augmentez la capacité du lieu (champ « Nbr d'espace ») dans la Base Cabinets, ou décalez les dates d'un des groupes."}
-            {conflictDetail.type === "overlap"         && "Décalez la date de début de ce groupe pour éviter le chevauchement sur le même lieu."}
-            {conflictDetail.type === "hors_periode"    && "Avancez la date de fin du groupe ou élargissez la période du workspace, puis régénérez la planification."}
-            {conflictDetail.type === "halfday"         && "Changez le créneau (Matin / Après-midi) de l'un des groupes, ou décalez la date."}
-            {conflictDetail.type === "holiday"         && "Cliquez sur Régénérer pour recalculer les dates en excluant les jours fériés."}
-            {conflictDetail.type === "vacation"        && "Cliquez sur Régénérer pour recalculer les dates en excluant cette période de congé."}
-          </div>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div style={{ padding: "10px 18px", borderTop: `1px solid ${T.pageBdr}`, display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
-        <button onClick={() => { setConflictDetail(null); setConflictEdit({}); } }
-          style={{ padding: "6px 18px", fontSize: 13, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-          Fermer
-        </button>
-      </div>
-    </div>
-  </div>
-)}
         {/* ── HEADER ── */}
         <div style={{ padding: "16px 22px 12px", borderBottom: `1px solid ${T.pageBdr}`, flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -6416,9 +6923,7 @@ const handleSafeClose = () => {
               return (
                 <div key={s.key} style={{ flex: 1 }}>
                   <div style={{ height: 2, borderRadius: 99, background: (done || active) ? T.accent : "rgba(55,53,47,0.1)", marginBottom: 4 }} />
-                  <div style={{ fontSize: 9, color: (done || active) ? T.accent : T.pageTer, fontWeight: (done || active) ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {done ? "✓ " : ""}{s.label}
-                  </div>
+                  <div style={{ fontSize: 9, color: (done || active) ? T.accent : T.pageTer, fontWeight: (done || active) ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{done ? "✓ " : ""}{s.label}</div>
                 </div>
               );
             })}
@@ -6436,19 +6941,16 @@ const handleSafeClose = () => {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
                 {[
-                  { color: "#0f7ddb", label: "Base Personnel ★",  desc: "Nom, prénom, intitulé, heures, matricule, dates…", required: true,  ready: b1Ready, fields: ["Nom/Prénom", "Intitulé", "Nb heures", "Matricule", "Dates"] },
-                  { color: "#448361", label: "Base Formations",    desc: "Domaine, objectif, contenu, niveau…",              required: false, ready: b2Ready, fields: ["Domaine", "Objectif", "Contenu", "Niveau"] },
-                  { color: "#9065b0", label: "Base Cabinets",      desc: "Cabinet, N° CNSS, lieu, coût, formateur…",         required: false, ready: b3Ready, fields: ["Cabinet", "CNSS", "Lieu", "Coût"] },
+                  { color: "#0f7ddb", label: "Base Personnel ★", desc: "Nom, prénom, intitulé, heures, matricule, dates…", required: true, ready: b1Ready, fields: ["Nom/Prénom", "Intitulé", "Nb heures", "Matricule", "Dates"] },
+                  { color: "#448361", label: "Base Formations", desc: "Domaine, objectif, contenu, niveau…", required: false, ready: b2Ready, fields: ["Domaine", "Objectif", "Contenu", "Niveau"] },
+                  { color: "#9065b0", label: "Base Cabinets", desc: "Cabinet, N° CNSS, lieu, coût, formateur…", required: false, ready: b3Ready, fields: ["Cabinet", "CNSS", "Lieu", "Coût"] },
                 ].map((b, i) => (
                   <div key={i} style={{ border: `1px solid ${b.ready ? `${b.color}35` : T.pageBdr}`, borderRadius: 7, padding: "14px 14px 12px", background: b.ready ? `${b.color}05` : "#fff" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: T.pageText }}>{b.label}</div>
-                      {b.ready
-                        ? <span style={{ fontSize: 10, fontWeight: 700, color: "#448361", padding: "1px 7px", borderRadius: 99, background: "rgba(68,131,97,0.1)", border: "1px solid rgba(68,131,97,0.25)" }}>PRÊT</span>
-                        : b.required
-                          ? <span style={{ fontSize: 10, fontWeight: 600, color: "#d44c47", padding: "1px 7px", borderRadius: 99, background: "rgba(212,76,71,0.06)", border: "1px solid rgba(212,76,71,0.2)" }}>requis</span>
-                          : <span style={{ fontSize: 10, color: T.pageTer, padding: "1px 7px", borderRadius: 99, border: `1px solid ${T.pageBdr}` }}>optionnel</span>
-                      }
+                      {b.ready ? <span style={{ fontSize: 10, fontWeight: 700, color: "#448361", padding: "1px 7px", borderRadius: 99, background: "rgba(68,131,97,0.1)", border: "1px solid rgba(68,131,97,0.25)" }}>PRÊT</span>
+                        : b.required ? <span style={{ fontSize: 10, fontWeight: 600, color: "#d44c47", padding: "1px 7px", borderRadius: 99, background: "rgba(212,76,71,0.06)", border: "1px solid rgba(212,76,71,0.2)" }}>requis</span>
+                          : <span style={{ fontSize: 10, color: T.pageTer, padding: "1px 7px", borderRadius: 99, border: `1px solid ${T.pageBdr}` }}>optionnel</span>}
                     </div>
                     <div style={{ fontSize: 11, color: T.pageSub, lineHeight: 1.6, marginBottom: 10 }}>{b.desc}</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
@@ -6466,14 +6968,13 @@ const handleSafeClose = () => {
           {/* ── ÉTAPE 2 ── */}
           {step === 2 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <BasePanel base={base1} setter={setBase1} fields={FIELDS_BASE1} fileRef={fileRef1} color="#0f7ddb" />
+              <BasePanel base={base1} setter={setBase1} fields={FIELDS_BASE1} fileRef={fileRef1} color="#0f7ddb" {...basePanelCommonProps} />
               {base1.rows.length > 0 && (
                 <div style={{ padding: "12px 14px", borderRadius: 6, border: `1px solid ${T.pageBdr}`, display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: T.pageSub, textTransform: "uppercase", letterSpacing: "0.05em" }}>Unité de durée</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     {[{ v: "heures", label: "Heures  (ex : 7.5)" }, { v: "jours", label: "Jours  (ex : 1, 0.5)" }].map(({ v, label }) => (
-                      <button key={v} onClick={() => setDurationUnit(v)}
-                        style={{ flex: 1, padding: "8px 12px", borderRadius: 4, border: `1.5px solid ${durationUnit === v ? T.accent : T.pageBdr}`, background: durationUnit === v ? `${T.accent}08` : "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: durationUnit === v ? 600 : 400, color: durationUnit === v ? T.accent : T.pageText, textAlign: "left", display: "flex", alignItems: "center", gap: 6 }}>
+                      <button key={v} onClick={() => setDurationUnit(v)} style={{ flex: 1, padding: "8px 12px", borderRadius: 4, border: `1.5px solid ${durationUnit === v ? T.accent : T.pageBdr}`, background: durationUnit === v ? `${T.accent}08` : "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: durationUnit === v ? 600 : 400, color: durationUnit === v ? T.accent : T.pageText, textAlign: "left", display: "flex", alignItems: "center", gap: 6 }}>
                         {durationUnit === v && <Check style={{ width: 11, height: 11 }} />}{label}
                       </button>
                     ))}
@@ -6491,7 +6992,7 @@ const handleSafeClose = () => {
               <div style={{ padding: "8px 12px", borderRadius: 5, border: "1px solid rgba(68,131,97,0.25)", background: "rgba(68,131,97,0.04)", fontSize: 12, color: "#448361", display: "flex", alignItems: "center", gap: 7 }}>
                 <CheckCircle2 style={{ width: 12, height: 12, flexShrink: 0 }} />Base optionnelle. Si vous n'avez pas ce fichier, cliquez sur "Passer".
               </div>
-              <BasePanel base={base2} setter={setBase2} fields={FIELDS_BASE2} fileRef={fileRef2} color="#448361" />
+              <BasePanel base={base2} setter={setBase2} fields={FIELDS_BASE2} fileRef={fileRef2} color="#448361" {...basePanelCommonProps} />
             </div>
           )}
 
@@ -6503,7 +7004,7 @@ const handleSafeClose = () => {
               <div style={{ padding: "8px 12px", borderRadius: 5, border: "1px solid rgba(144,101,176,0.25)", background: "rgba(144,101,176,0.04)", fontSize: 12, color: "#9065b0", display: "flex", alignItems: "center", gap: 7 }}>
                 <CheckCircle2 style={{ width: 12, height: 12, flexShrink: 0 }} />Base optionnelle. Si vous n'avez pas ce fichier, cliquez sur "Passer".
               </div>
-              <BasePanel base={base3} setter={setBase3} fields={FIELDS_BASE3} fileRef={fileRef3} color="#9065b0" />
+              <BasePanel base={base3} setter={setBase3} fields={FIELDS_BASE3} fileRef={fileRef3} color="#9065b0" {...basePanelCommonProps} />
             </div>
           )}
 
@@ -6514,17 +7015,12 @@ const handleSafeClose = () => {
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ fontSize: 12, color: T.pageSub }}>Vérifiez les bases avant de lancer la fusion.</div>
               {[
-                { label: "Base Personnel", ok: b1Ready, count: base1.rows.length - 1, excl: excluded1.size, color: "#0f7ddb", required: true  },
+                { label: "Base Personnel", ok: b1Ready, count: base1.rows.length - 1, excl: excluded1.size, color: "#0f7ddb", required: true },
                 { label: "Base Formations", ok: b2Ready, count: base2.rows.length - 1, excl: excluded2.size, color: "#448361", required: false },
-                { label: "Base Cabinets",  ok: b3Ready, count: base3.rows.length - 1, excl: excluded3.size, color: "#9065b0", required: false },
+                { label: "Base Cabinets", ok: b3Ready, count: base3.rows.length - 1, excl: excluded3.size, color: "#9065b0", required: false },
               ].map((b, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 6, border: `1px solid ${b.ok ? `${b.color}30` : b.required ? "rgba(212,76,71,0.25)" : T.pageBdr}`, background: b.ok ? `${b.color}04` : "#fff" }}>
-                  {b.ok
-                    ? <CheckCircle2 style={{ width: 15, height: 15, color: b.color, flexShrink: 0 }} />
-                    : b.required
-                      ? <AlertTriangle style={{ width: 15, height: 15, color: "#d44c47", flexShrink: 0 }} />
-                      : <div style={{ width: 15, height: 15, borderRadius: "50%", border: `2px dashed ${T.pageTer}`, flexShrink: 0 }} />
-                  }
+                  {b.ok ? <CheckCircle2 style={{ width: 15, height: 15, color: b.color, flexShrink: 0 }} /> : b.required ? <AlertTriangle style={{ width: 15, height: 15, color: "#d44c47", flexShrink: 0 }} /> : <div style={{ width: 15, height: 15, borderRadius: "50%", border: `2px dashed ${T.pageTer}`, flexShrink: 0 }} />}
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: T.pageText }}>{b.label}</div>
                     <div style={{ fontSize: 11, color: T.pageSub }}>{b.ok ? `${b.count} lignes${b.excl ? ` · ${b.excl} exclue(s)` : ""}` : b.required ? "Manquante" : "Non chargée"}</div>
@@ -6540,9 +7036,7 @@ const handleSafeClose = () => {
               <div style={{ fontSize: 12, color: T.pageSub }}>Définissez le nombre maximum de candidats par groupe.</div>
               <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>{["Intitulé", "Durée", "Dates pré-planifiées", "Total", "Max/groupe", "Groupes"].map(h => <th key={h} style={thS}>{h}</th>)}</tr>
-                  </thead>
+                  <thead><tr>{["Intitulé", "Durée", "Dates pré-planifiées", "Total", "Max/groupe", "Groupes"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                   <tbody>
                     {themeConf.map((tc, i) => {
                       const pg = Math.max(1, parseInt(tc.perGroup) || 15);
@@ -6551,18 +7045,10 @@ const handleSafeClose = () => {
                         <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "rgba(55,53,47,0.01)" }}>
                           <td style={{ ...tdS, fontWeight: 600, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tc.theme}>{tc.theme}</td>
                           <td style={{ ...tdS, fontFamily: "monospace" }}>{tc.halfDay ? "½ j" : `${tc.jours} j`}</td>
-                          <td style={tdS}>
-                            {tc.hasPreDates && tc.preDateDebut
-                              ? <span style={{ fontSize: 11, fontFamily: "monospace", color: "#337ea9" }}>{fmt(tc.preDateDebut)}{tc.preDateFin ? ` → ${fmt(tc.preDateFin)}` : ""}</span>
-                              : <span style={{ color: T.pageTer, fontSize: 11 }}>Auto</span>
-                            }
-                          </td>
+                          <td style={tdS}>{tc.hasPreDates && tc.preDateDebut ? <span style={{ fontSize: 11, fontFamily: "monospace", color: "#337ea9" }}>{fmt(tc.preDateDebut)}{tc.preDateFin ? ` → ${fmt(tc.preDateFin)}` : ""}</span> : <span style={{ color: T.pageTer, fontSize: 11 }}>Auto</span>}</td>
                           <td style={{ ...tdS, textAlign: "center", fontWeight: 700 }}>{tc.total}</td>
                           <td style={{ ...tdS, textAlign: "center" }}>
-                            <input type="number" min={1} step={1} value={tc.perGroup}
-                              onChange={e => setThemeConf(p => p.map((x, j) => j === i ? { ...x, perGroup: e.target.value } : x))}
-                              style={{ ...iS, width: 65, textAlign: "center", fontWeight: 600 }}
-                              onFocus={fI} onBlur={fO} />
+                            <input type="number" min={1} step={1} value={tc.perGroup} onChange={e => setThemeConf(p => p.map((x, j) => j === i ? { ...x, perGroup: e.target.value } : x))} style={{ ...iS, width: 65, textAlign: "center", fontWeight: 600 }} onFocus={fI} onBlur={fO} />
                           </td>
                           <td style={{ ...tdS, textAlign: "center", fontWeight: 600, color: T.accent }}>{nb} gr.</td>
                         </tr>
@@ -6574,9 +7060,7 @@ const handleSafeClose = () => {
                       <td colSpan={3} style={{ ...tdS, fontWeight: 600, color: T.pageSub, fontSize: 11 }}>Total</td>
                       <td style={{ ...tdS, textAlign: "center", fontWeight: 700 }}>{themeConf.reduce((s, t) => s + t.total, 0)}</td>
                       <td style={tdS} />
-                      <td style={{ ...tdS, textAlign: "center", fontWeight: 700, color: T.accent }}>
-                        {themeConf.reduce((s, tc) => s + Math.ceil(tc.total / Math.max(1, parseInt(tc.perGroup) || 15)), 0)} gr.
-                      </td>
+                      <td style={{ ...tdS, textAlign: "center", fontWeight: 700, color: T.accent }}>{themeConf.reduce((s, tc) => s + Math.ceil(tc.total / Math.max(1, parseInt(tc.perGroup) || 15)), 0)} gr.</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -6584,68 +7068,46 @@ const handleSafeClose = () => {
             </div>
           )}
 
-          {/* ════════════════════════════════════════════════════════
-              ÉTAPE 10 — Résultat & Gantt
-          ════════════════════════════════════════════════════════ */}
+          {/* ── ÉTAPE 10 ── */}
           {step === 10 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-              {/* ── Paramètres planification ── */}
               <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
-                <div onClick={() => setShowSettings(v => !v)}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "rgba(55,53,47,0.03)", cursor: "pointer", userSelect: "none" }}>
+                <div onClick={() => setShowSettings(v => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "rgba(55,53,47,0.03)", cursor: "pointer", userSelect: "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Settings style={{ width: 13, height: 13, color: T.pageSub }} />
                     <span style={{ fontSize: 12, fontWeight: 600, color: T.pageText }}>Paramètres de planification</span>
                     <span style={{ fontSize: 10, color: T.pageTer }}>Weekends · Fériés · Congés</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 11, color: T.pageSub, background: "rgba(55,53,47,0.06)", padding: "2px 8px", borderRadius: 10 }}>
-                      {7 - wd.length}j/sem · {sh ? "🇲🇦 Fériés ON" : "Fériés OFF"}{vacs.length ? ` · ${vacs.length} congé(s)` : ""}
-                    </span>
-                    {(wsStart || wsEnd) && (
-                      <span style={{ fontSize: 11, color: "#0f7ddb", background: "rgba(15,125,219,0.07)", border: "1px solid rgba(15,125,219,0.2)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>
-                       {wsStart ? fmt(wsStart) : "?"} → {wsEnd ? fmt(wsEnd) : "?"}
-                      </span>
-                    )}
+                    <span style={{ fontSize: 11, color: T.pageSub, background: "rgba(55,53,47,0.06)", padding: "2px 8px", borderRadius: 10 }}>{7 - wd.length}j/sem · {sh ? "🇲🇦 Fériés ON" : "Fériés OFF"}{vacs.length ? ` · ${vacs.length} congé(s)` : ""}</span>
+                    {(wsStart || wsEnd) && <span style={{ fontSize: 11, color: "#0f7ddb", background: "rgba(15,125,219,0.07)", border: "1px solid rgba(15,125,219,0.2)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{wsStart ? fmt(wsStart) : "?"} → {wsEnd ? fmt(wsEnd) : "?"}</span>}
                     <ChevronDown style={{ width: 13, height: 13, color: T.pageSub, transform: showSettings ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }} />
                   </div>
                 </div>
                 {showSettings && (
                   <div style={{ padding: "14px 16px", borderTop: `1px solid ${T.pageBdr}`, display: "flex", flexDirection: "column", gap: 14 }}>
-                    {/* Jours ouvrés */}
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: T.pageSub, marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.05em" }}>Jours de weekend (non ouvrés)</div>
                       <div style={{ display: "flex", gap: 4 }}>
                         {[["Lun", 1], ["Mar", 2], ["Mer", 3], ["Jeu", 4], ["Ven", 5], ["Sam", 6], ["Dim", 0]].map(([l, d]) => {
                           const isW = wd.includes(d);
-                          return (
-                            <button key={d} onClick={() => { setWd(p => p.includes(d) ? (p.length > 1 ? p.filter(x => x !== d) : p) : [...p, d]); setGanttDone(false); }}
-                              style={{ padding: "5px 10px", fontSize: 11, fontWeight: isW ? 600 : 400, borderRadius: 4, border: `1px solid ${isW ? T.accent : T.pageBdr}`, background: isW ? `${T.accent}10` : "#fff", cursor: "pointer", color: isW ? T.accent : T.pageSub, fontFamily: "inherit" }}>
-                              {isW ? <Check style={{ width: 9, height: 9, display: "inline", marginRight: 3 }} /> : null}{l}
-                            </button>
-                          );
+                          return <button key={d} onClick={() => { setWd(p => p.includes(d) ? (p.length > 1 ? p.filter(x => x !== d) : p) : [...p, d]); setGanttDone(false); }} style={{ padding: "5px 10px", fontSize: 11, fontWeight: isW ? 600 : 400, borderRadius: 4, border: `1px solid ${isW ? T.accent : T.pageBdr}`, background: isW ? `${T.accent}10` : "#fff", cursor: "pointer", color: isW ? T.accent : T.pageSub, fontFamily: "inherit" }}>{isW ? <Check style={{ width: 9, height: 9, display: "inline", marginRight: 3 }} /> : null}{l}</button>;
                         })}
                       </div>
                     </div>
-                    {/* Fériés */}
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <button onClick={() => { setSh(v => !v); setGanttDone(false); }}
-                        style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 4, border: `1px solid ${sh ? "rgba(68,131,97,0.35)" : T.pageBdr}`, background: sh ? "rgba(68,131,97,0.08)" : "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, color: sh ? "#448361" : T.pageSub, fontFamily: "inherit" }}>
-                        {sh ? <CheckCircle2 style={{ width: 12, height: 12 }} /> : <div style={{ width: 12, height: 12, borderRadius: "50%", border: `1.5px solid ${T.pageTer}` }} />}
-                        🇲🇦 Jours fériés marocains
+                      <button onClick={() => { setSh(v => !v); setGanttDone(false); }} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 4, border: `1px solid ${sh ? "rgba(68,131,97,0.35)" : T.pageBdr}`, background: sh ? "rgba(68,131,97,0.08)" : "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, color: sh ? "#448361" : T.pageSub, fontFamily: "inherit" }}>
+                        {sh ? <CheckCircle2 style={{ width: 12, height: 12 }} /> : <div style={{ width: 12, height: 12, borderRadius: "50%", border: `1.5px solid ${T.pageTer}` }} />}🇲🇦 Jours fériés marocains
                       </button>
                       <span style={{ fontSize: 11, color: T.pageTer }}>{sh ? "Les jours fériés sont exclus du calcul" : "Fériés non pris en compte"}</span>
                     </div>
-                    {/* Congés */}
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: T.pageSub, marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.05em" }}>Périodes de congés / fermeture</div>
                       <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                         <input placeholder="Libellé (ex: Ramadan)" value={vacForm.label} onChange={e => setVacForm(p => ({ ...p, label: e.target.value }))} style={{ ...iS, flex: 2 }} onFocus={fI} onBlur={fO} />
                         <input type="date" value={vacForm.start} onChange={e => setVacForm(p => ({ ...p, start: e.target.value }))} style={{ ...iS, flex: 1 }} onFocus={fI} onBlur={fO} />
                         <input type="date" value={vacForm.end} min={vacForm.start || undefined} onChange={e => setVacForm(p => ({ ...p, end: e.target.value }))} style={{ ...iS, flex: 1 }} onFocus={fI} onBlur={fO} />
-                        <button onClick={() => { if (!vacForm.start || !vacForm.end || vacForm.start > vacForm.end) return; setVacs(p => [...p, { id: uid(), ...vacForm }]); setVacForm({ label: "", start: "", end: "" }); setGanttDone(false); }}
-                          style={{ padding: "0 12px", background: "#37352f", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
+                        <button onClick={() => { if (!vacForm.start || !vacForm.end || vacForm.start > vacForm.end) return; setVacs(p => [...p, { id: uid(), ...vacForm }]); setVacForm({ label: "", start: "", end: "" }); setGanttDone(false); }} style={{ padding: "0 12px", background: "#37352f", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
                           <Plus style={{ width: 13, height: 13 }} /> Ajouter
                         </button>
                       </div>
@@ -6653,10 +7115,8 @@ const handleSafeClose = () => {
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                           {vacs.map(v => (
                             <div key={v.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px 3px 10px", borderRadius: 4, background: "rgba(51,126,169,0.08)", border: "1px solid rgba(51,126,169,0.22)", fontSize: 11, color: "#337ea9" }}>
-                               <strong>{v.label}</strong> · {fmt(v.start)} → {fmt(v.end)}
-                              <button onClick={() => { setVacs(p => p.filter(x => x.id !== v.id)); setGanttDone(false); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#337ea9", padding: 0, marginLeft: 2, display: "flex", alignItems: "center" }}>
-                                <X style={{ width: 10, height: 10 }} />
-                              </button>
+                              <strong>{v.label}</strong> · {fmt(v.start)} → {fmt(v.end)}
+                              <button onClick={() => { setVacs(p => p.filter(x => x.id !== v.id)); setGanttDone(false); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#337ea9", padding: 0, marginLeft: 2, display: "flex", alignItems: "center" }}><X style={{ width: 10, height: 10 }} /></button>
                             </div>
                           ))}
                         </div>
@@ -6666,9 +7126,8 @@ const handleSafeClose = () => {
                 )}
               </div>
 
-              {/* ── Bandeau hors-intervalle ── */}
               {(() => {
-                const wsE = wsEnd || (wsStart ? `${wsStart.slice(0,4)}-12-31` : null);
+                const wsE = wsEnd || (wsStart ? `${wsStart.slice(0, 4)}-12-31` : null);
                 const oor = wsE ? groupRows.filter(gr => gr.end && gr.end > wsE).length : 0;
                 return oor > 0 ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 5, background: "rgba(212,76,71,0.07)", border: "1px solid rgba(212,76,71,0.3)" }}>
@@ -6679,7 +7138,6 @@ const handleSafeClose = () => {
                 ) : null;
               })()}
 
-              {/* ── Bandeaux conflits ── */}
               {conflictCount > 0 && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 5, background: "rgba(212,76,71,0.06)", border: "1px solid rgba(212,76,71,0.22)" }}>
                   <AlertTriangle style={{ width: 13, height: 13, color: "#d44c47", flexShrink: 0 }} />
@@ -6694,47 +7152,28 @@ const handleSafeClose = () => {
                 </div>
               )}
 
-              {/* ── Bouton Gantt ── */}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button onClick={generateGantt}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", fontSize: 12, fontWeight: 700, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                  <Wand2 style={{ width: 13, height: 13 }} />
-                  {ganttDone ? "♻ Regénérer auto" : "Générer planification auto"}
+                <button onClick={generateGantt} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", fontSize: 12, fontWeight: 700, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
+                  <Wand2 style={{ width: 13, height: 13 }} />{ganttDone ? "♻ Regénérer auto" : "Générer planification auto"}
                 </button>
-                {ganttDone
-                  ? <span style={{ fontSize: 11, color: "#448361" }}>✓ Planification générée — vous pouvez ajuster les dates manuellement</span>
-                  : <span style={{ fontSize: 11, color: T.pageTer }}>Génère les dates automatiquement en respectant weekends, fériés et congés</span>
-                }
+                {ganttDone ? <span style={{ fontSize: 11, color: "#448361" }}>✓ Planification générée — vous pouvez ajuster les dates manuellement</span> : <span style={{ fontSize: 11, color: T.pageTer }}>Génère les dates automatiquement en respectant weekends, fériés et congés</span>}
               </div>
 
-              {/* ── Barre contrôle : picker colonnes + filtres actifs ── */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-
-                {/* Picker colonnes */}
                 <div style={{ position: "relative" }}>
-                  <button onClick={() => setShowColPicker(v => !v)}
-                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", fontSize: 11, fontWeight: 600, color: showColPicker ? T.accent : T.pageText, background: showColPicker ? `${T.accent}0d` : "#fff", border: `1px solid ${showColPicker ? T.accent : T.pageBdr}`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                    <Columns style={{ width: 12, height: 12 }} />
-                    Colonnes
-                    <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 99, background: T.accent, color: "#fff", marginLeft: 2 }}>
-                      {Object.values(visibleCols).filter(Boolean).length}
-                    </span>
+                  <button onClick={() => setShowColPicker(v => !v)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", fontSize: 11, fontWeight: 600, color: showColPicker ? T.accent : T.pageText, background: showColPicker ? `${T.accent}0d` : "#fff", border: `1px solid ${showColPicker ? T.accent : T.pageBdr}`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
+                    <Columns style={{ width: 12, height: 12 }} />Colonnes
+                    <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 99, background: T.accent, color: "#fff", marginLeft: 2 }}>{Object.values(visibleCols).filter(Boolean).length}</span>
                   </button>
-
                   {showColPicker && (
                     <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, background: "#fff", border: `1px solid ${T.pageBdr}`, borderRadius: 6, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: "10px 0", minWidth: 260, maxHeight: 420, overflowY: "auto" }}>
                       {COL_GROUPS.map(grp => (
                         <div key={grp}>
-                          <div style={{ padding: "6px 14px 4px", fontSize: 9, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.07em", borderTop: grp !== COL_GROUPS[0] ? `1px solid ${T.pageBdr}` : "none", marginTop: grp !== COL_GROUPS[0] ? 6 : 0 }}>
-                            {grp}
-                          </div>
+                          <div style={{ padding: "6px 14px 4px", fontSize: 9, fontWeight: 700, color: T.pageTer, textTransform: "uppercase", letterSpacing: "0.07em", borderTop: grp !== COL_GROUPS[0] ? `1px solid ${T.pageBdr}` : "none", marginTop: grp !== COL_GROUPS[0] ? 6 : 0 }}>{grp}</div>
                           {COL_DEFS.filter(c => c.group === grp).map(col => {
-                            const isOn     = visibleCols[col.key];
-                            const hasFilter = !!colFilters[col.key];
+                            const isOn = visibleCols[col.key], hasFilter = !!colFilters[col.key];
                             return (
-                              <div key={col.key}
-                                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 14px", cursor: "pointer", background: isOn ? `${T.accent}06` : "transparent" }}
-                                onClick={() => setVisibleCols(p => ({ ...p, [col.key]: !p[col.key] }))}>
+                              <div key={col.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 14px", cursor: "pointer", background: isOn ? `${T.accent}06` : "transparent" }} onClick={() => setVisibleCols(p => ({ ...p, [col.key]: !p[col.key] }))}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                   <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${isOn ? T.accent : "rgba(55,53,47,0.25)"}`, background: isOn ? T.accent : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
                                     {isOn && <Check style={{ width: 9, height: 9, color: "#fff" }} />}
@@ -6747,159 +7186,87 @@ const handleSafeClose = () => {
                           })}
                         </div>
                       ))}
-                      {/* Footer picker */}
                       <div style={{ display: "flex", gap: 6, padding: "10px 14px 4px", borderTop: `1px solid ${T.pageBdr}`, marginTop: 6 }}>
-                        <button onClick={e => { e.stopPropagation(); const next = {}; COL_DEFS.forEach(c => { next[c.key] = true; }); setVisibleCols(next); }}
-                          style={{ flex: 1, padding: "4px 0", fontSize: 11, fontWeight: 600, color: T.accent, background: `${T.accent}0d`, border: `1px solid ${T.accent}30`, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>
-                          Tout afficher
-                        </button>
-                        <button onClick={e => { e.stopPropagation(); const next = {}; COL_DEFS.forEach(c => { next[c.key] = ["theme","groupe","count","duree","start","end","statut"].includes(c.key); }); setVisibleCols(next); }}
-                          style={{ flex: 1, padding: "4px 0", fontSize: 11, color: T.pageSub, background: "transparent", border: `1px solid ${T.pageBdr}`, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>
-                          Par défaut
-                        </button>
+                        <button onClick={e => { e.stopPropagation(); const next = {}; COL_DEFS.forEach(c => { next[c.key] = true; }); setVisibleCols(next); }} style={{ flex: 1, padding: "4px 0", fontSize: 11, fontWeight: 600, color: T.accent, background: `${T.accent}0d`, border: `1px solid ${T.accent}30`, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>Tout afficher</button>
+                        <button onClick={e => { e.stopPropagation(); const next = {}; COL_DEFS.forEach(c => { next[c.key] = ["theme", "groupe", "count", "duree", "start", "end", "statut"].includes(c.key); }); setVisibleCols(next); }} style={{ flex: 1, padding: "4px 0", fontSize: 11, color: T.pageSub, background: "transparent", border: `1px solid ${T.pageBdr}`, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>Par défaut</button>
                       </div>
                     </div>
                   )}
                 </div>
-
-                {/* Chips filtres actifs */}
                 {Object.entries(colFilters).filter(([, v]) => v).map(([key, val]) => {
                   const colDef = COL_DEFS.find(c => c.key === key);
                   return (
                     <div key={key} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px 3px 10px", borderRadius: 4, background: `${T.accent}0d`, border: `1px solid ${T.accent}25`, fontSize: 11, color: T.accent }}>
-                      <span style={{ fontWeight: 600 }}>{colDef?.label} :</span>
-                      <span>{val}</span>
-                      <button onClick={() => setColFilters(p => { const n = { ...p }; delete n[key]; return n; })}
-                        style={{ border: "none", background: "transparent", cursor: "pointer", color: T.accent, padding: 0, display: "flex", alignItems: "center" }}>
-                        <X style={{ width: 10, height: 10 }} />
-                      </button>
+                      <span style={{ fontWeight: 600 }}>{colDef?.label} :</span><span>{val}</span>
+                      <button onClick={() => setColFilters(p => { const n = { ...p }; delete n[key]; return n; })} style={{ border: "none", background: "transparent", cursor: "pointer", color: T.accent, padding: 0, display: "flex", alignItems: "center" }}><X style={{ width: 10, height: 10 }} /></button>
                     </div>
                   );
                 })}
-
-                {/* Compteur */}
-                <span style={{ fontSize: 11, color: T.pageTer, marginLeft: "auto" }}>
-                  {groupRowsFiltered.length} / {groupRows.length} groupe{groupRows.length > 1 ? "s" : ""}
-                </span>
-
-                {/* Reset filtres */}
+                <span style={{ fontSize: 11, color: T.pageTer, marginLeft: "auto" }}>{groupRowsFiltered.length} / {groupRows.length} groupe{groupRows.length > 1 ? "s" : ""}</span>
                 {Object.values(colFilters).some(Boolean) && (
-                  <button onClick={() => setColFilters({})}
-                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 9px", fontSize: 11, color: "#d44c47", background: "rgba(212,76,71,0.06)", border: "1px solid rgba(212,76,71,0.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                  <button onClick={() => setColFilters({})} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 9px", fontSize: 11, color: "#d44c47", background: "rgba(212,76,71,0.06)", border: "1px solid rgba(212,76,71,0.2)", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
                     <X style={{ width: 10, height: 10 }} /> Réinitialiser filtres
                   </button>
                 )}
               </div>
 
-              {/* ── Tableau ── */}
               <div style={{ border: `1px solid ${T.pageBdr}`, borderRadius: 6, overflow: "hidden" }}>
                 <div style={{ overflowX: "auto", maxHeight: 420 }}>
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
-
-                    {/* THEAD */}
                     <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
-                      {/* Ligne 1 : headers + tri */}
                       <tr style={{ background: "#f0f0f0" }}>
                         {COL_DEFS.filter(c => visibleCols[c.key]).map(col => (
-                          <th key={col.key}
-                            style={{ ...thS, cursor: col.sortable ? "pointer" : "default", userSelect: "none", whiteSpace: "nowrap", background: sortField === col.key ? `${T.accent}10` : "rgba(55,53,47,0.03)" }}
-                            onClick={() => col.sortable && handleSort(col.key)}>
-                            <div style={{ display: "flex", alignItems: "center" }}>
-                              {col.label}
-                              {col.sortable && <SortIcon field={col.key} />}
-                            </div>
+                          <th key={col.key} style={{ ...thS, cursor: col.sortable ? "pointer" : "default", userSelect: "none", whiteSpace: "nowrap", background: sortField === col.key ? `${T.accent}10` : "rgba(55,53,47,0.03)" }} onClick={() => col.sortable && handleSort(col.key)}>
+                            <div style={{ display: "flex", alignItems: "center" }}>{col.label}{col.sortable && <SortIcon field={col.key} />}</div>
                           </th>
                         ))}
                       </tr>
-                      {/* Ligne 2 : filtres inline */}
                       <tr style={{ background: "#f7f7f7", borderBottom: `1px solid ${T.pageBdr}` }}>
                         {COL_DEFS.filter(c => visibleCols[c.key]).map(col => (
                           <th key={col.key} style={{ padding: "4px 6px" }}>
                             {col.filterable ? (
                               col.key === "statut" ? (
-                                <select value={colFilters[col.key] || ""} onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))}
-                                  style={{ ...iS, fontSize: 10, width: "100%", padding: "2px 4px" }}>
-                                  <option value="">Tous</option>
-                                  <option value="ok">✓ OK</option>
-                                  <option value="conflit">⚠ Conflit</option>
-                                  <option value="planifier">À planifier</option>
+                                <select value={colFilters[col.key] || ""} onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))} style={{ ...iS, fontSize: 10, width: "100%", padding: "2px 4px" }}>
+                                  <option value="">Tous</option><option value="ok">✓ OK</option><option value="conflit">⚠ Conflit</option><option value="planifier">À planifier</option>
                                 </select>
                               ) : colUniqueValues[col.key]?.length > 0 && col.key !== "theme" && col.key !== "objectif" && col.key !== "contenu" ? (
-                                <select value={colFilters[col.key] || ""} onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))}
-                                  style={{ ...iS, fontSize: 10, width: "100%", padding: "2px 4px" }}>
-                                  <option value="">Tous</option>
-                                  {colUniqueValues[col.key].map(v => <option key={v} value={v}>{v}</option>)}
+                                <select value={colFilters[col.key] || ""} onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))} style={{ ...iS, fontSize: 10, width: "100%", padding: "2px 4px" }}>
+                                  <option value="">Tous</option>{colUniqueValues[col.key].map(v => <option key={v} value={v}>{v}</option>)}
                                 </select>
                               ) : (
-                                <input placeholder="Filtrer…" value={colFilters[col.key] || ""} onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))}
-                                  style={{ ...iS, fontSize: 10, width: "100%", padding: "2px 4px" }} />
+                                <input placeholder="Filtrer…" value={colFilters[col.key] || ""} onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))} style={{ ...iS, fontSize: 10, width: "100%", padding: "2px 4px" }} />
                               )
                             ) : <div />}
                           </th>
                         ))}
                       </tr>
                     </thead>
-
-                    {/* TBODY */}
                     <tbody>
                       {groupRowsFiltered.map((gr, i) => {
-                        const cf                  = conflictIndex[gr.key];
-                        const hasOverlap          = cf?.has("overlap");
-                        const hasSallePleine      = cf?.has("salle_pleine");
-                        const hasHoliday          = cf?.has("holiday");
-                        const hasVac              = cf?.has("vacation");
-                        const hasHalfDayConflict  = halfDayConflictKeys.has(gr.key);
-                        const hasCandidatConflict = candidatConflictKeys.has(gr.key);
-                        const wsE          = wsEnd || (wsStart ? `${wsStart.slice(0,4)}-12-31` : null);
+                        const cf = conflictIndex[gr.key];
+                        const hasOverlap = cf?.has("overlap"), hasSallePleine = cf?.has("salle_pleine"), hasHoliday = cf?.has("holiday"), hasVac = cf?.has("vacation");
+                        const hasHalfDayConflict = halfDayConflictKeys.has(gr.key), hasCandidatConflict = candidatConflictKeys.has(gr.key);
+                        const wsE = wsEnd || (wsStart ? `${wsStart.slice(0, 4)}-12-31` : null);
                         const isOutOfRange = wsE && gr.end && gr.end > wsE;
-                        const currentSlot  = gr.slot || "matin";
-
+                        const currentSlot = gr.slot || "matin";
                         const isRed = isOutOfRange || hasOverlap || hasSallePleine || hasHalfDayConflict || hasCandidatConflict;
-                        const rowBg = isRed        ? "rgba(212,76,71,0.06)"
-                          : hasVac                 ? "rgba(51,126,169,0.06)"
-                          : hasHoliday             ? "rgba(68,131,97,0.06)"
-                          : i % 2 === 0            ? "#fff"
-                          :                          "rgba(55,53,47,0.01)";
-                        const borderColor = isRed  ? "#d44c47"
-                          : hasVac                 ? "#337ea9"
-                          : hasHoliday             ? "#448361"
-                          :                          "transparent";
-
+                        const rowBg = isRed ? "rgba(212,76,71,0.06)" : hasVac ? "rgba(51,126,169,0.06)" : hasHoliday ? "rgba(68,131,97,0.06)" : i % 2 === 0 ? "#fff" : "rgba(55,53,47,0.01)";
+                        const borderColor = isRed ? "#d44c47" : hasVac ? "#337ea9" : hasHoliday ? "#448361" : "transparent";
                         return (
                           <tr key={gr.key} style={{ background: rowBg, borderLeft: `3px solid ${borderColor}` }}>
-                            {COL_DEFS.filter(c => visibleCols[c.key]).map(col =>
-                              renderCell(col.key, gr, cf, hasOverlap, hasSallePleine, hasHoliday, hasVac, hasHalfDayConflict, hasCandidatConflict, isOutOfRange, currentSlot)
-                            )}
+                            {COL_DEFS.filter(c => visibleCols[c.key]).map(col => renderCell(col.key, gr, cf, hasOverlap, hasSallePleine, hasHoliday, hasVac, hasHalfDayConflict, hasCandidatConflict, isOutOfRange, currentSlot))}
                           </tr>
                         );
                       })}
                       {groupRowsFiltered.length === 0 && (
-                        <tr>
-                          <td colSpan={COL_DEFS.filter(c => visibleCols[c.key]).length}
-                            style={{ ...tdS, textAlign: "center", padding: "24px", color: T.pageTer, fontStyle: "italic" }}>
-                            Aucun groupe ne correspond aux filtres
-                          </td>
-                        </tr>
+                        <tr><td colSpan={COL_DEFS.filter(c => visibleCols[c.key]).length} style={{ ...tdS, textAlign: "center", padding: "24px", color: T.pageTer, fontStyle: "italic" }}>Aucun groupe ne correspond aux filtres</td></tr>
                       )}
                     </tbody>
-
-                    {/* TFOOT */}
                     <tfoot>
                       <tr style={{ background: "rgba(55,53,47,0.02)" }}>
                         {COL_DEFS.filter(c => visibleCols[c.key]).map((col, idx) => (
                           <td key={col.key} style={{ ...tdS, fontWeight: 600, fontSize: 11, color: T.pageSub }}>
-                            {idx === 0
-                              ? groupRowsFiltered.length < groupRows.length
-                                ? `${groupRowsFiltered.length} / ${groupRows.length} groupes`
-                                : `${groupRows.length} groupe${groupRows.length > 1 ? "s" : ""}`
-                              : col.key === "count"
-                              ? `${groupRowsFiltered.reduce((s, g) => s + g.count, 0)} cand.`
-                              : col.key === "statut"
-                              ? conflictCount > 0
-                                ? <span style={{ color: "#d44c47", fontWeight: 700 }}>⚠ {conflictCount} conflit(s)</span>
-                                : ganttDone ? <span style={{ color: "#448361" }}>✓ Prêt</span> : ""
-                              : ""
-                            }
+                            {idx === 0 ? (groupRowsFiltered.length < groupRows.length ? `${groupRowsFiltered.length} / ${groupRows.length} groupes` : `${groupRows.length} groupe${groupRows.length > 1 ? "s" : ""}`) : col.key === "count" ? `${groupRowsFiltered.reduce((s, g) => s + g.count, 0)} cand.` : col.key === "statut" ? conflictCount > 0 ? <span style={{ color: "#d44c47", fontWeight: 700 }}>⚠ {conflictCount} conflit(s)</span> : ganttDone ? <span style={{ color: "#448361" }}>✓ Prêt</span> : "" : ""}
                           </td>
                         ))}
                       </tr>
@@ -6907,105 +7274,34 @@ const handleSafeClose = () => {
                   </table>
                 </div>
               </div>
-
             </div>
           )}
-          {/* ── FIN ÉTAPE 10 ── */}
-
         </div>
-        {/* ── FIN BODY ── */}
 
         {/* ── FOOTER ── */}
         <div style={{ padding: "12px 22px", borderTop: `1px solid ${T.pageBdr}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <button
-            onClick={() => {
-              if (step === 1) handleSafeClose();
-              else if (step === 3) setStep(2);
-              else if (step === 5) setStep(4);
-              else if (step === 7) setStep(6);
-              else if (step === 8) setStep(6);
-              else setStep(s => s - 1);
-            }}
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 13px", fontSize: 12, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
+          <button onClick={() => { if (step === 1) handleSafeClose(); else if (step === 3) setStep(2); else if (step === 5) setStep(4); else if (step === 7) setStep(6); else if (step === 8) setStep(6); else setStep(s => s - 1); }} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 13px", fontSize: 12, color: T.pageSub, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
             <ChevronLeft style={{ width: 13, height: 13 }} />{step === 1 ? "Annuler" : "Retour"}
           </button>
-
           <div style={{ display: "flex", gap: 8 }}>
-            {step === 1 && (
-              <button onClick={() => setStep(2)}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: T.accent, border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                Commencer <ChevronRight style={{ width: 12, height: 12 }} />
-              </button>
-            )}
-            {step === 2 && (
-              <button onClick={() => { const { anomalies, excluded } = analyzeBase1(); setAnomalies1(anomalies); setExcluded1(excluded); setStep(3); }}
-                disabled={!b1Ready}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: b1Ready ? "#37352f" : "#ccc", border: "none", borderRadius: 4, cursor: b1Ready ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
-                Vérifier les données <ChevronRight style={{ width: 12, height: 12 }} />
-              </button>
-            )}
-            {step === 3 && (
-              <button onClick={() => setStep(4)}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                Continuer <ChevronRight style={{ width: 12, height: 12 }} />
-              </button>
-            )}
+            {step === 1 && <button onClick={() => setStep(2)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: T.accent, border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Commencer <ChevronRight style={{ width: 12, height: 12 }} /></button>}
+            {step === 2 && <button onClick={() => { const { anomalies, excluded } = analyzeBase1(); setAnomalies1(anomalies); setExcluded1(excluded); setStep(3); }} disabled={!b1Ready} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: b1Ready ? "#37352f" : "#ccc", border: "none", borderRadius: 4, cursor: b1Ready ? "pointer" : "not-allowed", fontFamily: "inherit" }}>Vérifier les données <ChevronRight style={{ width: 12, height: 12 }} /></button>}
+            {step === 3 && <button onClick={() => setStep(4)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Continuer <ChevronRight style={{ width: 12, height: 12 }} /></button>}
             {step === 4 && (b2Ready
-              ? <button onClick={() => { const { anomalies, excluded } = analyzeBaseEnrich(base2); setAnomalies2(anomalies); setExcluded2(excluded); setStep(5); }}
-                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                  Vérifier les données <ChevronRight style={{ width: 12, height: 12 }} />
-                </button>
-              : <button onClick={() => setStep(6)}
-                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, color: T.pageText, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                  Passer <ChevronRight style={{ width: 12, height: 12 }} />
-                </button>
+              ? <button onClick={() => { const { anomalies, excluded } = analyzeBaseEnrich(base2); setAnomalies2(anomalies); setExcluded2(excluded); setStep(5); }} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Vérifier les données <ChevronRight style={{ width: 12, height: 12 }} /></button>
+              : <button onClick={() => setStep(6)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, color: T.pageText, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Passer <ChevronRight style={{ width: 12, height: 12 }} /></button>
             )}
-            {step === 5 && (
-              <button onClick={() => setStep(6)}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                Continuer <ChevronRight style={{ width: 12, height: 12 }} />
-              </button>
-            )}
+            {step === 5 && <button onClick={() => setStep(6)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Continuer <ChevronRight style={{ width: 12, height: 12 }} /></button>}
             {step === 6 && (b3Ready
-              ? <button onClick={() => { const { anomalies, excluded } = analyzeBaseEnrich(base3); setAnomalies3(anomalies); setExcluded3(excluded); setStep(7); }}
-                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                  Vérifier les données <ChevronRight style={{ width: 12, height: 12 }} />
-                </button>
-              : <button onClick={() => setStep(8)}
-                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, color: T.pageText, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                  Passer <ChevronRight style={{ width: 12, height: 12 }} />
-                </button>
+              ? <button onClick={() => { const { anomalies, excluded } = analyzeBaseEnrich(base3); setAnomalies3(anomalies); setExcluded3(excluded); setStep(7); }} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Vérifier les données <ChevronRight style={{ width: 12, height: 12 }} /></button>
+              : <button onClick={() => setStep(8)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, color: T.pageText, background: "transparent", border: `1px solid rgba(55,53,47,0.2)`, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Passer <ChevronRight style={{ width: 12, height: 12 }} /></button>
             )}
-            {step === 7 && (
-              <button onClick={() => setStep(8)}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                Continuer <ChevronRight style={{ width: 12, height: 12 }} />
-              </button>
-            )}
-            {step === 8 && (
-              <button onClick={fusionBases} disabled={!b1Ready}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: b1Ready ? "#37352f" : "#ccc", border: "none", borderRadius: 4, cursor: b1Ready ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
-                <Shuffle style={{ width: 12, height: 12 }} /> Fusionner et créer les groupes <ChevronRight style={{ width: 12, height: 12 }} />
-              </button>
-            )}
-            {step === 9 && (
-              <button onClick={generateGroups}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
-                Générer les groupes <ChevronRight style={{ width: 12, height: 12 }} />
-              </button>
-            )}
-            {step === 10 && (
-              <button onClick={confirm} disabled={importing}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff",       background: importing ? "#ccc" : "#37352f", 
- border: "none", borderRadius: 4,       cursor: importing ? "not-allowed" : "pointer",
- fontFamily: "inherit" }}>
-                {importing ? <Spinner size={12} color="#fff" /> : <Check style={{ width: 12, height: 12 }} />}
-                {importing ? "Import en cours…" : `Importer ${result.length} candidats`}
-              </button>
-            )}
+            {step === 7 && <button onClick={() => setStep(8)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Continuer <ChevronRight style={{ width: 12, height: 12 }} /></button>}
+            {step === 8 && <button onClick={fusionBases} disabled={!b1Ready} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: b1Ready ? "#37352f" : "#ccc", border: "none", borderRadius: 4, cursor: b1Ready ? "pointer" : "not-allowed", fontFamily: "inherit" }}><Shuffle style={{ width: 12, height: 12 }} /> Fusionner et créer les groupes <ChevronRight style={{ width: 12, height: 12 }} /></button>}
+            {step === 9 && <button onClick={generateGroups} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#37352f", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>Générer les groupes <ChevronRight style={{ width: 12, height: 12 }} /></button>}
+            {step === 10 && <button onClick={confirm} disabled={importing} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", background: importing ? "#ccc" : "#37352f", border: "none", borderRadius: 4, cursor: importing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>{importing ? <Spinner size={12} color="#fff" /> : <Check style={{ width: 12, height: 12 }} />}{importing ? "Import en cours…" : `Importer ${result.length} candidats`}</button>}
           </div>
         </div>
-        {/* ── FIN FOOTER ── */}
 
       </div>
     </div>
@@ -7275,24 +7571,35 @@ function CandidatsView({ currentUser, candidats, setCandidats, tasks, setTasks, 
             {multiImportOpen && (
               <MultiBaseImportWizard
                 onClose={()=>setMultiImportOpen(false)}
-                onDone={async (cands, newTasks, newDocs) => {
-                  setCandidats(normArr(cands));
-                  setTasks(normArr(newTasks));
-                  if (newDocs) setDocuments(normArr(newDocs));
-                  showToast("Importation réussie","success");
-                  setTimeout(async () => {
-                    try {
-                      const [resTasks,resCands,resDocs] = await Promise.all([
-                        apiFetch(`/workspaces/${wsId}/tasks`),
-                        apiFetch(`/workspaces/${wsId}/candidats?limit=5000`),
-                        apiFetch(`/workspaces/${wsId}/documents`),
-                      ]);
-                      setTasks(normArr(extractArray(resTasks,"tasks")));
-                      setCandidats(normArr(extractArray(resCands,"candidats")));
-                      setDocuments(normArr(extractArray(resDocs,"documents")));
-                    } catch(e) { console.error("Erreur sync:",e); }
-                  }, 1500);
-                }}
+                onDone={async () => {
+  // 1. Vider les états locaux pour forcer le rafraîchissement visuel
+  setTasks([]);
+  setCandidats([]);
+  setDocuments([]);
+
+  showToast("Importation réussie, synchronisation...", "success");
+
+  // 2. Attendre que le serveur finisse d'écrire
+  setTimeout(async () => {
+    try {
+      const [resTasks, resCands, resDocs] = await Promise.all([
+        apiFetch(`/workspaces/${wsId}/tasks`), // <-- Changé ici : wsId au lieu de activeWs
+        apiFetch(`/workspaces/${wsId}/candidats?limit=5000`), // <-- Changé ici
+        apiFetch(`/workspaces/${wsId}/documents`), // <-- Changé ici
+      ]);
+
+      // 3. Mettre à jour avec les données réelles du serveur
+      setTasks(normArr(extractArray(resTasks, "tasks")));
+      setCandidats(normArr(extractArray(resCands, "candidats")));
+      setDocuments(normArr(extractArray(resDocs, "documents")));
+      
+      showToast("Données mises à jour", "success");
+    } catch (e) {
+      console.error("Erreur sync après import:", e);
+      showToast("Erreur de rafraîchissement", "error");
+    }
+  }, 1500);
+}}
                 setTasks={setTasks}
                 wsStart={ws?.startDate||null}
                 wsEnd={ws?.endDate||null}
@@ -7623,7 +7930,8 @@ function DownloadAllModal({ candidats, tasks, mode, globalEntreprise = "", globa
   const [done, setDone] = useState(false);
   const [entreprise, setEntreprise] = useState(globalEntreprise || "");
   const [logoUrl, setLogoUrl] = useState(globalLogoUrl || "");
-  const [format, setFormat] = useState("pdf"); // "pdf" ou "word"
+  const [format, setFormat] = useState("pdf");
+  const [selectedMode, setSelectedMode] = useState(mode); // ← nouveau
   const logoInputRef = useRef(null);
 
   const delay = (ms) => new Promise(res => setTimeout(res, ms));
@@ -7634,7 +7942,7 @@ function DownloadAllModal({ candidats, tasks, mode, globalEntreprise = "", globa
   );
 
   const totalCount = useMemo(() => {
-    if (mode === "EMARGEMENTS") {
+    if (selectedMode === "EMARGEMENTS") {
       let n = 0;
       themes.forEach(theme => {
         const groupes = [...new Set(candidats.filter(c => c.theme === theme).map(c => String(c.groupe || "1")))];
@@ -7643,17 +7951,17 @@ function DownloadAllModal({ candidats, tasks, mode, globalEntreprise = "", globa
       return n;
     }
     return themes.length;
-  }, [mode, themes, candidats]);
+  }, [selectedMode, themes, candidats]);
 
   const pct = totalCount > 0 ? Math.round((progress.current / totalCount) * 100) : 0;
 
-  // ── UTILITAIRES DE CALCUL ──
+  // ── UTILITAIRES ──
 
   const classifyCSP = (csp = "") => {
     const v = (csp || "").toLowerCase();
     if (["ingénieurs","cadre","cadres","manager"].some(k => v.includes(k))) return "C";
     if (["superviseur","maîtrise","technicien","employé","employe"].some(k => v.includes(k))) return "E";
-    return "O"; // Ouvrier par défaut
+    return "O";
   };
 
   const getWorkDays = (start, end) => {
@@ -7668,155 +7976,115 @@ function DownloadAllModal({ candidats, tasks, mode, globalEntreprise = "", globa
     return days;
   };
 
-  // ── GÉNÉRATION PDF (COPIE CONFORME IMAGE 1) ──
+  // ── GÉNÉRATION PDF ──
 
   const generatePresencePDF = (theme, grp, grpCands) => {
-  const doc = new jsPDF({
-    orientation: "landscape",
-    unit: "mm",
-    format: "a4",
-  });
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
 
-  const pageWidth = doc.internal.pageSize.getWidth(); // 297mm
-  const pageHeight = doc.internal.pageSize.getHeight(); // 210mm
+    const task = tasks.find(
+      (t) => t.group?.trim() === theme?.trim() && String(t.groupe) === String(grp)
+    );
+    const workDays = getWorkDays(task?.start, task?.end);
 
-  // 1. Données de planification
-  const task = tasks.find(
-    (t) => t.group?.trim() === theme?.trim() && String(t.groupe) === String(grp)
-  );
-  const workDays = getWorkDays(task?.start, task?.end);
+    if (logoUrl) {
+      try { doc.addImage(logoUrl, "PNG", 15, 10, 30, 12); } catch (e) {}
+    }
 
-  // 2. Logo
-  if (logoUrl) {
-    try { doc.addImage(logoUrl, "PNG", 15, 10, 30, 12); } catch (e) {}
-  }
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bolditalic");
+    doc.text("LISTE DE PRESENCE PAR ACTION ET PAR GROUPE", pageWidth / 2, 18, { align: "center" });
 
-  // 3. Titre
-  doc.setFontSize(13);
-  doc.setFont("helvetica", "bolditalic");
-  doc.text("LISTE DE PRESENCE PAR ACTION ET PAR GROUPE", pageWidth / 2, 18, { align: "center" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Entreprise", 15, 32);
+    doc.text("Thème de l'action", 15, 38);
+    doc.text("Jours de réalisation", 15, 44);
 
-  // 4. Bloc d'informations
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("Entreprise", 15, 32);
-  doc.text("Thème de l'action", 15, 38);
-  doc.text("Jours de réalisation", 15, 44);
+    doc.setFont("helvetica", "normal");
+    doc.text(`: ${entreprise || "________________"}`, 55, 32);
+    doc.text(`: ${theme}`, 55, 38);
 
-  doc.setFont("helvetica", "normal");
-  doc.text(`: ${entreprise || "________________"}`, 55, 32);
-  doc.text(`: ${theme}`, 55, 38);
-  
-  const dateStr = workDays.length > 0
+    const dateStr = workDays.length > 0
       ? `: ${workDays.map((d) => String(d.getDate()).padStart(2, "0")).join("-")}/${String(workDays[0].getMonth() + 1).padStart(2, "0")}/${workDays[0].getFullYear()}`
       : ": ________________";
-  doc.text(dateStr, 55, 44);
+    doc.text(dateStr, 55, 44);
+    doc.setFont("helvetica", "bold");
+    doc.text(`G ${grp}`, pageWidth - 20, 38, { align: "right" });
 
-  doc.setFont("helvetica", "bold");
-  doc.text(`G ${grp}`, pageWidth - 20, 38, { align: "right" });
-
-  // 5. Tableau
-  const head = [
-    [
-      { content: "Nom", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
-      { content: "Prénom", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
-      { content: "N° CIN", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
-      { content: "N°CNSS", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
-      { content: "C.S.P", colSpan: 3, styles: { halign: "center" } },
-      ...workDays.map((d) => ({
-        content: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
-        rowSpan: 2,
-        styles: { halign: "center", valign: "middle" },
-      })),
-    ],
-    ["C", "E", "O"],
-  ];
-
-  const body = grpCands.map((c) => {
-    const csp = classifyCSP(c.extraData?.csp || c.csp || "");
-    return [
-      (c.nom || "").toUpperCase(),
-      c.prenom || "",
-      c.cin || c.extraData?.cin || "",
-      "", // CNSS Vide
-      csp === "C" ? "X" : "",
-      csp === "E" ? "X" : "",
-      csp === "O" ? "X" : "",
-      ...workDays.map(() => ""),
+    const head = [
+      [
+        { content: "Nom", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
+        { content: "Prénom", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
+        { content: "N° CIN", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
+        { content: "N°CNSS", rowSpan: 2, styles: { halign: "center", valign: "middle" } },
+        { content: "C.S.P", colSpan: 3, styles: { halign: "center" } },
+        ...workDays.map((d) => ({
+          content: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
+          rowSpan: 2,
+          styles: { halign: "center", valign: "middle" },
+        })),
+      ],
+      ["C", "E", "O"],
     ];
-  });
 
-  autoTable(doc, {
-    startY: 48,
-    margin: { bottom: 45 }, // Espace réservé pour le footer
-    head: head,
-    body: body,
-    theme: "grid",
-    styles: { fontSize: 7.5, cellPadding: 1.5, lineColor: 0, lineWidth: 0.1 },
-    headStyles: { fillColor: [220, 230, 241], textColor: 0, fontStyle: "bold" },
-    columnStyles: {
-      0: { fontStyle: "bold", width: 38 },
-      4: { halign: "bold", width: 7 },
-      5: { halign: "center", width: 7 },
-      6: { halign: "center", width: 7 },
-    },
-  });
+    const body = grpCands.map((c) => {
+      const csp = classifyCSP(c.extraData?.csp || c.csp || "");
+      return [
+        (c.nom || "").toUpperCase(),
+        c.prenom || "",
+        c.cin || c.extraData?.cin || "",
+        "",
+        csp === "C" ? "X" : "",
+        csp === "E" ? "X" : "",
+        csp === "O" ? "X" : "",
+        ...workDays.map(() => ""),
+      ];
+    });
 
-  // 6. FOOTER
-const footerY = pageHeight - 20;
+    autoTable(doc, {
+      startY: 48,
+      margin: { bottom: 45 },
+      head,
+      body,
+      theme: "grid",
+      styles: { fontSize: 7.5, cellPadding: 1.5, lineColor: 0, lineWidth: 0.1 },
+      headStyles: { fillColor: [220, 230, 241], textColor: 0, fontStyle: "bold" },
+      columnStyles: {
+        0: { fontStyle: "bold", width: 38 },
+        4: { halign: "bold", width: 7 },
+        5: { halign: "center", width: 7 },
+        6: { halign: "center", width: 7 },
+      },
+    });
 
-doc.setFontSize(8.5);
-doc.setFont("helvetica", "normal");
+    const footerY = pageHeight - 20;
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "normal");
+    doc.text("(*) C.S.P : Catégorie socio-professionnelle", 15, footerY - 16);
+    doc.text("C: Cadre – E: Employé – O: Ouvrier", 15, footerY - 11);
+    doc.text("Cachet de l'organisme de formation", 15, footerY);
+    doc.text("et identité du signataire", 15, footerY + 5);
+    doc.text("Cachet et signature du responsable", pageWidth - 15, footerY, { align: "right" });
+    doc.text("de formation de l'entreprise", pageWidth - 15, footerY + 5, { align: "right" });
 
-// Légende
-doc.text("(*) C.S.P : Catégorie socio-professionnelle", 15, footerY - 16);
-doc.text("C: Cadre – E: Employé – O: Ouvrier",          15, footerY - 11);
+    doc.save(`Presence_${theme.substring(0, 20).trim()}_G${grp}.pdf`);
+  };
 
-// Espace de ~5mm entre les deux blocs
+  // ── GÉNÉRATION WORD PRÉSENCE ──
 
-// Bloc gauche — signatures organisme
-doc.text("Cachet de l'organisme de formation",           15, footerY);
-doc.text("et identité du signataire",                    15, footerY + 5);
+  const generatePresenceWord = (theme, grp, grpCands) => {
+    const task = tasks.find(
+      t => t.group?.trim() === theme?.trim() && String(t.groupe) === String(grp)
+    );
+    const workDays = getWorkDays(task?.start, task?.end);
 
-// Bloc droit — aligné bord droit du tableau
-doc.text("Cachet et signature du responsable",   pageWidth - 15, footerY,     { align: "right" });
-doc.text("de formation de l'entreprise",          pageWidth - 15, footerY + 5, { align: "right" });
+    const dateStr = workDays.length > 0
+      ? `${workDays.map(d => d.getDate()).join('-')}/${workDays[0].getMonth() + 1}/${workDays[0].getFullYear()}`
+      : "________________";
 
-  doc.save(`Presence_${theme.substring(0, 20).trim()}_G${grp}.pdf`);
-};
-
-  // ── GÉNÉRATION WORD ──
-
-const generatePresenceWord = (theme, grp, grpCands) => {
-  const task = tasks.find(
-    t => t.group?.trim() === theme?.trim() && String(t.groupe) === String(grp)
-  );
-
-  const workDays = getWorkDays(task?.start, task?.end);
-
-  const dateStr = workDays.length > 0
-    ? `${workDays.map(d => d.getDate()).join('-')}/${workDays[0].getMonth() + 1}/${workDays[0].getFullYear()}`
-    : "________________";
-
-  // ── Calcul dynamique de la hauteur utile ──────────────────────────
-  // Page A4 paysage en pt : 841.9 x 595.3
-  // Marges : haut 1cm ≈ 28.3pt, bas 1.5cm ≈ 42.5pt
-  // Hauteur utile totale ≈ 595.3 - 28.3 - 42.5 = 524.5pt
-  const PAGE_HEIGHT_PT = 524;
-
-  // Hauteur estimée du contenu (header + infos + tableau)
-  const HEADER_PT   = 50;   // logo + titre
-  const INFOS_PT    = 55;   // 3 lignes infos + br
-  const TH_PT       = 40;   // 2 lignes thead
-  const ROW_PT      = 18;   // hauteur d'une ligne candidat
-  const FOOTER_PT   = 70;   // footer (légende + cachets)
-
-  const contentHeight = HEADER_PT + INFOS_PT + TH_PT + (grpCands.length * ROW_PT);
-  const remainingHeight = PAGE_HEIGHT_PT - contentHeight;
-  // On donne au moins 10pt d'espace avant le footer
-  const spacerHeight = Math.max(remainingHeight - FOOTER_PT, 10);
-
-  const html = `
+    const html = `
     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
     <head>
       <meta charset="UTF-8">
@@ -7830,28 +8098,18 @@ const generatePresenceWord = (theme, grp, grpCands) => {
       </xml>
       <![endif]-->
       <style>
-        /* Définition de la page */
         @page Section1 {
-          size: 841.9pt 595.3pt; /* A4 Paysage */
+          size: 841.9pt 595.3pt;
           mso-page-orientation: landscape;
           margin: 1.0cm 1.0cm 1.0cm 1.0cm;
-          
-          /* C'est ici qu'on lie le footer */
           mso-footer: f1;
         }
         div.Section1 { page: Section1; }
-
-        /* Style spécifique pour que Word reconnaisse le footer */
         p.MsoFooter, li.MsoFooter, div.MsoFooter {
-          margin: 0in;
-          margin-bottom: .0001pt;
-          mso-pagination: widow-orphan;
-          font-size: 10.0pt;
+          margin: 0in; margin-bottom: .0001pt;
+          mso-pagination: widow-orphan; font-size: 10.0pt;
         }
-
-        /* Identifiant du bloc footer */
         #f1 { mso-element: footer; }
-
         body { font-family: Arial, sans-serif; font-size: 10pt; }
         table { border-collapse: collapse; width: 100%; }
         .main-table th, .main-table td { border: 0.5pt solid #000; padding: 4px 6px; }
@@ -7863,12 +8121,10 @@ const generatePresenceWord = (theme, grp, grpCands) => {
     </head>
     <body>
       <div class="Section1">
-        
-        <!-- CONTENU PRINCIPAL -->
         <table style="margin-bottom:8px; border:none;">
           <tr>
             <td style="width:20%; border:none;">
-              ${logoUrl ? `<img src="${logoUrl}" width="140">` : "<b>SAFRAN</b>"}
+              ${logoUrl ? `<img src="${logoUrl}" width="140">` : "<b>LOGO</b>"}
             </td>
             <td class="title" style="width:60%; border:none;">
               LISTE DE PRESENCE PAR ACTION ET PAR GROUPE
@@ -7876,11 +8132,10 @@ const generatePresenceWord = (theme, grp, grpCands) => {
             <td style="width:20%; border:none;"></td>
           </tr>
         </table>
-
         <table style="margin-bottom:10px; border:none;">
           <tr>
             <td style="width:130px; font-weight:bold; border:none;">Entreprise</td>
-            <td style="border:none;">: <span class="text-bold">${entreprise || 'SAFRAN'}</span></td>
+            <td style="border:none;">: <span class="text-bold">${entreprise || ''}</span></td>
             <td style="text-align:right; font-weight:bold; border:none;">G ${grp}</td>
           </tr>
           <tr>
@@ -7892,7 +8147,6 @@ const generatePresenceWord = (theme, grp, grpCands) => {
             <td colspan="2" style="border:none;">: <span class="text-bold">${dateStr}</span></td>
           </tr>
         </table>
-
         <table class="main-table">
           <thead>
             <tr class="header-bg">
@@ -7924,8 +8178,6 @@ const generatePresenceWord = (theme, grp, grpCands) => {
             `).join('')}
           </tbody>
         </table>
-
-        <!-- PIED DE PAGE (DÉFINITION) -->
         <div style="mso-element:footer" id="f1">
           <p class="MsoFooter">
             <span style="font-size:9pt;">(*) C.S.P : Catégorie socio-professionnelle &nbsp;&nbsp; C: Cadre – E: Employé – O: Ouvrier</span>
@@ -7943,18 +8195,333 @@ const generatePresenceWord = (theme, grp, grpCands) => {
             </tr>
           </table>
         </div>
-
       </div>
     </body>
     </html>`;
 
-  const blob = new Blob(["\ufeff", html], {
-    type: "application/msword;charset=utf-8"
-  });
+    const blob = new Blob(["\ufeff", html], { type: "application/msword;charset=utf-8" });
+    saveAs(blob, `Presence_${theme}_G${grp}.doc`);
+  };
 
-  saveAs(blob, `Presence_${theme}_G${grp}.doc`);
-};
+  // ── GÉNÉRATION FICHE F2 WORD ──
 
+  const generateFicheF2Word = async (theme, themeCands, tasks, groupsPerPage = 5) => {
+    const isWeekend = d => d.getDay() === 0 || d.getDay() === 6;
+
+    const workDaysBetween = (ds, de, half = false) => {
+      if (!ds) return 0;
+      let cur = new Date(ds + "T00:00:00");
+      const end = new Date((de || ds) + "T00:00:00");
+      let j = 0, s = 0;
+      while (cur <= end && s < 200) { s++; if (!isWeekend(cur)) j++; cur.setDate(cur.getDate() + 1); }
+      return half ? j * 0.5 : j;
+    };
+
+    const renderDates = grp => {
+      if (!grp.dateDebut) return "—";
+      const fmt = d => `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
+      if (!grp.dateFin || grp.dateDebut === grp.dateFin) return fmt(new Date(grp.dateDebut + "T00:00:00"));
+      let cur = new Date(grp.dateDebut + "T00:00:00");
+      const end = new Date(grp.dateFin + "T00:00:00");
+      const days = []; let s = 0;
+      while (cur <= end && s < 200) { s++; if (!isWeekend(cur)) days.push(new Date(cur)); cur.setDate(cur.getDate() + 1); }
+      if (!days.length) return "—";
+      const last = days[days.length - 1];
+      return days.map(d => String(d.getDate()).padStart(2,"0")).join(";") +
+        `/${String(last.getMonth()+1).padStart(2,"0")}/${last.getFullYear()}`;
+    };
+
+    const PAGE_W = 11906, PAGE_H = 16838, MARGIN = 567;
+    const CONTENT = PAGE_W - MARGIN * 2;
+    const BLUE = "003366", BLACK = "000000";
+
+    const bdr = (color = BLACK, size = 4) => ({ style: BorderStyle.SINGLE, size, color });
+    const allBdr = () => { const b = bdr(); return { top: b, bottom: b, left: b, right: b }; };
+
+    const mkPara = (runs, opts = {}) => new Paragraph({
+      alignment: opts.align || AlignmentType.LEFT,
+      spacing: opts.spacing || { before: 0, after: 0 },
+      children: Array.isArray(runs) ? runs : [runs],
+      ...(opts.border ? { border: opts.border } : {}),
+    });
+
+    const mkRun = (text, opts = {}) => new TextRun({
+      text: text || "", font: "Arial",
+      size: opts.size ?? 20, bold: opts.bold ?? false, color: opts.color ?? BLACK,
+    });
+
+    const mkCell = (children, width, opts = {}) => new TableCell({
+      width: { size: width, type: WidthType.DXA },
+      borders: opts.borders ?? allBdr(),
+      shading: opts.shading ? { fill: opts.shading, type: ShadingType.CLEAR } : undefined,
+      margins: { top: 60, bottom: 60, left: 100, right: 100 },
+      verticalAlign: opts.vAlign ?? VerticalAlign.CENTER,
+      columnSpan: opts.span, rowSpan: opts.rowSpan,
+      children: Array.isArray(children) ? children : [children],
+    });
+
+    const lCell = (text, width, opts = {}) => mkCell(
+      mkPara(mkRun(text, { bold: opts.bold ?? false, color: opts.color ?? BLUE, size: 20 }),
+        { align: AlignmentType.LEFT }), width, opts
+    );
+
+    const dCell = (text, width, opts = {}) => mkCell(
+      mkPara(mkRun(String(text ?? ""), { bold: opts.bold ?? false, size: 20 }),
+        { align: opts.align ?? AlignmentType.LEFT }), width, opts
+    );
+
+    const classifyCSPF2 = (csp = "") => {
+      const v = (csp || "").toLowerCase();
+      if (["ingénieur","cadre","cadres","manager"].some(k => v.includes(k))) return "cadres";
+      if (["superviseur","technicien","employé","employe"].some(k => v.includes(k))) return "employes";
+      if (["ouvrier","opérateur"].some(k => v.includes(k))) return "ouvriers";
+      return "cadres";
+    };
+
+    const findExtraData = (key) => {
+      for (const c of themeCands) {
+        const val = c.extraData?.[key] || c[key] || "";
+        if (val && String(val).trim()) return String(val).trim();
+      }
+      return "";
+    };
+
+    const form = {
+      domaine:       findExtraData("domaine") || "Technique",
+      theme,
+      objectif:      findExtraData("objectif"),
+      contenu:       findExtraData("contenu"),
+      cabinet:       findExtraData("cabinet"),
+      cnss:          findExtraData("cnss"),
+      typeFormation: findExtraData("typeFormation") || "Intra-entreprise",
+      cout:          findExtraData("cout") || "0",
+      lieu:          findExtraData("lieu") || "",
+      heureDebut:    "09:00",
+      heureFin:      "17:00",
+    };
+
+    const uniqueGroupNums = [...new Set(themeCands.map(c => String(c.groupe || "1")))].sort((a,b) => Number(a)-Number(b));
+    const groupeRows = uniqueGroupNums.map(gNum => {
+      const candsInGrp = themeCands.filter(c => String(c.groupe || "1") === gNum);
+      const task = tasks.find(t =>
+        (t.group?.toLowerCase().trim() === theme?.toLowerCase().trim()) &&
+        String(t.groupe || "1") === gNum
+      );
+      return {
+        groupe:    gNum,
+        effectif:  candsInGrp.length,
+        dateDebut: task?.start || candsInGrp[0]?.dateDebut || "",
+        dateFin:   task?.end   || candsInGrp[0]?.dateFin   || "",
+        halfDay:   task?.halfDay || false,
+        slot:      task?.slot || "matin",
+      };
+    });
+
+    const totalPages = Math.ceil(groupeRows.length / groupsPerPage);
+    const sections  = [];
+
+    for (let page = 0; page < totalPages; page++) {
+      const currentGroups    = groupeRows.slice(page * groupsPerPage, (page + 1) * groupsPerPage);
+      const currentCandidats = themeCands.filter(c =>
+        currentGroups.some(g => String(g.groupe) === String(c.groupe || "1"))
+      );
+
+      const cadresCt   = currentCandidats.filter(c => classifyCSPF2(c.extraData?.csp) === "cadres").length;
+      const employesCt = currentCandidats.filter(c => classifyCSPF2(c.extraData?.csp) === "employes").length;
+      const ouvriersCt = currentCandidats.filter(c => classifyCSPF2(c.extraData?.csp) === "ouvriers").length;
+      const total      = currentCandidats.length;
+
+      const prix = parseFloat(String(form.cout || "0").replace(/\s/g,"").replace(",",".")) || 0;
+      const totalJours = currentGroups.reduce((acc, g) => acc + workDaysBetween(g.dateDebut, g.dateFin, g.halfDay), 0);
+      const coutAffiche = (prix * totalJours).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " MAD";
+
+      const spacer = new Paragraph({ spacing: { before: 80, after: 80 }, children: [] });
+
+      const objectifLines = (form.objectif || "").split("\n").filter(l => l.trim())
+        .map(l => mkPara(mkRun(l.trim()), { spacing: { before: 0, after: 30 } }));
+      if (!objectifLines.length) objectifLines.push(mkPara(mkRun(" ")));
+
+      const contenuLines = (form.contenu || "").split("\n").filter(l => l.trim())
+        .map(l => mkPara(mkRun(l.trim().startsWith("-") ? l.trim() : `- ${l.trim()}`), { spacing: { before: 0, after: 30 } }));
+      for (let i = 0; i < 3; i++) contenuLines.push(mkPara(mkRun(" "), { spacing: { before: 0, after: 60 } }));
+
+      const bloc1 = new Table({
+        width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [CONTENT],
+        rows: [
+          new TableRow({ children: [lCell("Domaine de Formation : (selon la NDF*)", CONTENT, { bold: true })] }),
+          new TableRow({ children: [dCell(form.domaine, CONTENT)] }),
+          new TableRow({ children: [lCell("Thème de l'Action :", CONTENT, { bold: true })] }),
+          new TableRow({ children: [dCell(form.theme, CONTENT, { bold: true })] }),
+          new TableRow({ children: [lCell("Objectif (compétence visée) :", CONTENT, { bold: true })] }),
+          new TableRow({ children: [mkCell(objectifLines, CONTENT, { vAlign: VerticalAlign.TOP })] }),
+          new TableRow({ children: [lCell("Contenu indicatif", CONTENT, { bold: true })] }),
+          new TableRow({ children: [mkCell(contenuLines, CONTENT, { vAlign: VerticalAlign.TOP })] }),
+        ],
+      });
+
+      const q = Math.floor(CONTENT / 4);
+      const bloc2 = new Table({
+        width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [q, q, q, q],
+        rows: [
+          new TableRow({ children: [new TableCell({
+            columnSpan: 4, width: { size: CONTENT, type: WidthType.DXA },
+            borders: allBdr(), margins: { top: 60, bottom: 60, left: 100, right: 100 },
+            children: [mkPara(mkRun("Effectif global de la population concernée :", { bold: true, color: BLUE }))],
+          })]}),
+          new TableRow({ children: [
+            dCell("Cadres", q, { align: AlignmentType.CENTER }),
+            dCell("Employés", q, { align: AlignmentType.CENTER }),
+            dCell("Ouvriers", q, { align: AlignmentType.CENTER }),
+            dCell("Total", q, { align: AlignmentType.CENTER }),
+          ]}),
+          new TableRow({ children: [
+            dCell(cadresCt,   q, { align: AlignmentType.CENTER, bold: true }),
+            dCell(employesCt, q, { align: AlignmentType.CENTER, bold: true }),
+            dCell(ouvriersCt, q, { align: AlignmentType.CENTER, bold: true }),
+            dCell(total,      q, { align: AlignmentType.CENTER, bold: true }),
+          ]}),
+        ],
+      });
+
+      const w1 = Math.floor(CONTENT * 0.28), w2 = CONTENT - w1;
+      const bloc3 = new Table({
+        width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [w1, w2],
+        rows: [
+          new TableRow({ children: [new TableCell({
+            columnSpan: 2, width: { size: CONTENT, type: WidthType.DXA },
+            borders: allBdr(), margins: { top: 60, bottom: 60, left: 100, right: 100 },
+            children: [mkPara(mkRun("Organisme de Formation :", { bold: true, color: BLUE }))],
+          })]}),
+          new TableRow({ children: [dCell("Raison sociale :", w1), dCell(form.cabinet || "", w2)] }),
+          new TableRow({ children: [dCell("N°CNSS :", w1),        dCell(form.cnss    || "", w2)] }),
+        ],
+      });
+
+      const isIntra = form.typeFormation === "Intra-entreprise";
+      const chk = v => v ? "■" : "□";
+      const bloc4 = new Table({
+        width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [w1, w2],
+        rows: [new TableRow({ children: [
+          dCell("Type de formation :", w1),
+          mkCell(mkPara([
+            mkRun(`${chk(isIntra)} `, { size: 32 }),
+            mkRun("Intra-entreprise       ", { size: 20 }),
+            mkRun(`${chk(!isIntra)} `, { size: 32 }),
+            mkRun("Inter-entreprises", { size: 20 }),
+          ]), w2),
+        ]})],
+      });
+
+      const wC1 = Math.floor(CONTENT * 0.32), wC2 = CONTENT - wC1;
+      const bloc5 = new Table({
+        width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [wC1, wC2],
+        rows: [new TableRow({ children: [
+          mkCell(mkPara(mkRun("Coût de la Formation HT :", { bold: true, color: BLUE }), { align: AlignmentType.CENTER }), wC1),
+          dCell(coutAffiche, wC2, { bold: true }),
+        ]})],
+      });
+
+      const colGrp  = Math.floor(CONTENT * 0.11);
+      const colEff  = Math.floor(CONTENT * 0.09);
+      const colDate = Math.floor(CONTENT * 0.24);
+      const colHd   = Math.floor(CONTENT * 0.11);
+      const colHf   = Math.floor(CONTENT * 0.11);
+      const colLieu = CONTENT - colGrp - colEff - colDate - colHd - colHf;
+
+      const thCell = (txt, w) => mkCell(mkPara(mkRun(txt, { size: 18 }), { align: AlignmentType.CENTER }), w);
+      const headerRow = new TableRow({ children: [
+        thCell("Groupe Module", colGrp), thCell("Effectif", colEff),
+        thCell("Les Dates", colDate),    thCell("Heure Début", colHd),
+        thCell("Heure Fin", colHf),      thCell("Lieu", colLieu),
+      ]});
+
+      const totalRows = Math.max(currentGroups.length, groupsPerPage);
+      const dataRows  = [];
+      for (let i = 0; i < totalRows; i++) {
+        const g = currentGroups[i];
+        if (!g) {
+          dataRows.push(new TableRow({ children: [
+            dCell("", colGrp), dCell("", colEff), dCell("", colDate), dCell("", colHd), dCell("", colHf),
+          ]}));
+          continue;
+        }
+        let hDebut = form.heureDebut, hFin = form.heureFin;
+        if (g.halfDay) {
+          if (g.slot === "matin")        { hDebut = "09:00"; hFin = "12:00"; }
+          if (g.slot === "après-midi")   { hDebut = "14:00"; hFin = "17:00"; }
+        }
+        const cols = [
+          dCell(String(g.groupe).padStart(2,"0"), colGrp, { align: AlignmentType.CENTER }),
+          dCell(g.effectif,   colEff, { align: AlignmentType.CENTER }),
+          dCell(renderDates(g), colDate, { align: AlignmentType.CENTER }),
+          dCell(hDebut,       colHd,  { align: AlignmentType.CENTER }),
+          dCell(hFin,         colHf,  { align: AlignmentType.CENTER }),
+        ];
+        if (i === 0) {
+          cols.push(new TableCell({
+            width: { size: colLieu, type: WidthType.DXA },
+            borders: allBdr(), rowSpan: totalRows + 1,
+            margins: { top: 60, bottom: 60, left: 100, right: 100 },
+            verticalAlign: VerticalAlign.TOP,
+            children: [mkPara(mkRun(form.lieu || "", { size: 18 }))],
+          }));
+        }
+        dataRows.push(new TableRow({ children: cols }));
+      }
+
+      const pauseRow = new TableRow({ children: [
+        dCell("", colGrp), dCell("", colEff), dCell("", colDate),
+        new TableCell({
+          columnSpan: 2, width: { size: colHd + colHf, type: WidthType.DXA },
+          borders: allBdr(), margins: { top: 60, bottom: 60, left: 100, right: 100 },
+          verticalAlign: VerticalAlign.CENTER,
+          children: [mkPara(mkRun("Pause déjeunée de 12 h à 14 h", { size: 18 }), { align: AlignmentType.CENTER })],
+        }),
+      ]});
+
+      const bloc6 = new Table({
+        width: { size: CONTENT, type: WidthType.DXA },
+        columnWidths: [colGrp, colEff, colDate, colHd, colHf, colLieu],
+        rows: [headerRow, ...dataRows, pauseRow],
+      });
+
+      sections.push({
+        properties: {
+          page: {
+            size:   { width: PAGE_W, height: PAGE_H },
+            margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN },
+          },
+        },
+        children: [
+          mkPara(mkRun("Contrats Spéciaux de Formation", { size: 22, bold: true })),
+          mkPara(mkRun("Formulaire F2", { size: 22, bold: true }), { align: AlignmentType.CENTER, spacing: { before: 40, after: 0 } }),
+          new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: BLACK } }, spacing: { before: 40, after: 0 }, children: [] }),
+          mkPara(mkRun("Fiche d'identification de l'action de formation"), { align: AlignmentType.CENTER, spacing: { before: 60, after: 80 } }),
+          bloc1, spacer,
+          bloc2, spacer,
+          bloc3, spacer,
+          bloc4, spacer,
+          bloc5, spacer,
+          bloc6,
+        ],
+      });
+    }
+
+    const doc = new Document({
+      styles: { default: { document: { run: { font: "Arial", size: 20, color: BLACK } } } },
+      sections,
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `FicheF2_${theme.replace(/\s+/g,"_")}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // ── LOGIQUE DE BOUCLE ──
 
@@ -7962,25 +8529,36 @@ const generatePresenceWord = (theme, grp, grpCands) => {
     setDone(false);
     let current = 0;
 
+    if (selectedMode === "FICHES_F2") {
+      setProgress({ current: 0, total: themes.length, label: "Préparation..." });
+      for (const theme of themes) {
+        current++;
+        setProgress({ current, total: themes.length, label: theme });
+        const themeCands = candidats.filter(c => c.theme === theme);
+        await generateFicheF2Word(theme, themeCands, tasks, 5);
+        await delay(600);
+      }
+      setDone(true);
+      return;
+    }
+
+    // EMARGEMENTS
     for (const theme of themes) {
       const themeCands = candidats.filter(c => c.theme === theme);
       const grps = [...new Set(themeCands.map(c => String(c.groupe || "1")))].sort();
-
       for (const g of grps) {
         current++;
         setProgress({ current, total: totalCount, label: `${theme} - G${g}` });
         const cands = themeCands.filter(c => String(c.groupe || "1") === g);
-
         if (format === "pdf") generatePresencePDF(theme, g, cands);
         else generatePresenceWord(theme, g, cands);
-        
         await delay(600);
       }
     }
     setDone(true);
   };
 
-  // ── Remplacez uniquement le return() de DownloadAllModal ──
+  // ── RENDER ──
 
   const btnBase = { border: "none", background: "none", cursor: "pointer", fontFamily: "inherit" };
 
@@ -7994,7 +8572,7 @@ const generatePresenceWord = (theme, grp, grpCands) => {
             <div style={{ width: 28, height: 28, borderRadius: 6, background: "#f7f7f5", border: "1px solid #e3e3e2", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <ClipboardCheck size={14} color="#37352f" />
             </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#37352f", letterSpacing: "-0.01em" }}>Génération des émargements</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#37352f", letterSpacing: "-0.01em" }}>Génération des documents</span>
           </div>
           <button onClick={onClose} style={{ ...btnBase, width: 24, height: 24, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", color: "#9b9a97" }}>
             <X size={14} />
@@ -8005,62 +8583,29 @@ const generatePresenceWord = (theme, grp, grpCands) => {
         <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
           {progress.current === 0 ? (
             <>
-              {/* Logo + Entreprise */}
-              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                <div
-                  onClick={() => logoInputRef.current.click()}
-                  style={{ width: 56, height: 56, border: "1px dashed #d3d3d1", borderRadius: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", background: "#fafaf9", flexShrink: 0, gap: 3 }}
-                >
-                  {logoUrl
-                    ? <img src={logoUrl} style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 5 }} />
-                    : <>
-                        <ImageIcon size={16} color="#b7b6b2" />
-                        <span style={{ fontSize: 9, color: "#b7b6b2", fontWeight: 500 }}>Logo</span>
-                      </>
-                  }
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b6b6b", marginBottom: 5 }}>Nom de l'entreprise</label>
-                  <input
-                    value={entreprise}
-                    onChange={e => setEntreprise(e.target.value)}
-                    placeholder="Ex : SAFRAN Maroc…"
-                    style={{ width: "100%", boxSizing: "border-box", padding: "8px 11px", border: "1px solid #e3e3e2", borderRadius: 6, fontSize: 13, color: "#37352f", outline: "none", fontFamily: "inherit" }}
-                  />
-                  <p style={{ fontSize: 11, color: "#b7b6b2", margin: "5px 0 0" }}>Apparaîtra sur chaque liste d'émargement</p>
-                </div>
-                <input type="file" ref={logoInputRef} onChange={(e) => {
-                  const file = e.target.files[0];
-                  if (file) { const reader = new FileReader(); reader.onload = (ev) => setLogoUrl(ev.target.result); reader.readAsDataURL(file); }
-                }} style={{ display: "none" }} accept="image/*" />
-              </div>
-
-              {/* Format */}
-              <div style={{ borderTop: "1px solid #f0f0ee", paddingTop: 16 }}>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b6b6b", marginBottom: 8 }}>Format de sortie</label>
+              {/* ── Sélecteur de type de document ── */}
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b6b6b", marginBottom: 8 }}>Type de document</label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   {[
                     {
-                      key: "pdf",
-                      label: "Fichier PDF",
-                      sub: "Impression directe",
-                      activeColor: "#0f7ddb",
-                      activeBg: "#f0f7ff",
+                      key: "EMARGEMENTS",
+                      label: "Listes de présence",
+                      sub: "Une par groupe et thème",
                       icon: (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d44c47" strokeWidth="2">
-                          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                          <polyline points="14 2 14 8 20 8"/>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="3" y="3" width="18" height="18" rx="2"/>
+                          <line x1="3" y1="9" x2="21" y2="9"/>
+                          <line x1="9" y1="21" x2="9" y2="9"/>
                         </svg>
                       ),
                     },
                     {
-                      key: "word",
-                      label: "Fichier Word",
-                      sub: "Éditable",
-                      activeColor: "#2b579a",
-                      activeBg: "#f0f4fa",
+                      key: "FICHES_F2",
+                      label: "Fiches F2",
+                      sub: "Une par thème",
                       icon: (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2b579a" strokeWidth="2">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
                           <polyline points="14 2 14 8 20 8"/>
                           <line x1="16" y1="13" x2="8" y2="13"/>
@@ -8068,23 +8613,30 @@ const generatePresenceWord = (theme, grp, grpCands) => {
                         </svg>
                       ),
                     },
-                  ].map(({ key, label, sub, activeColor, activeBg, icon }) => {
-                    const active = format === key;
+                  ].map(({ key, label, sub, icon }) => {
+                    const active = selectedMode === key;
                     return (
                       <button
                         key={key}
-                        onClick={() => setFormat(key)}
-                        style={{ ...btnBase, padding: "10px 12px", borderRadius: 6, border: `${active ? "1.5px" : "1px"} solid ${active ? activeColor : "#e3e3e2"}`, background: active ? activeBg : "#fff", display: "flex", alignItems: "center", gap: 8, textAlign: "left", transition: "all 0.12s" }}
+                        onClick={() => setSelectedMode(key)}
+                        style={{
+                          ...btnBase,
+                          padding: "10px 12px", borderRadius: 6,
+                          border: `${active ? "1.5px" : "1px"} solid ${active ? "#0a6bc4" : "#e3e3e2"}`,
+                          background: active ? "#f0f7ff" : "#fff",
+                          display: "flex", alignItems: "center", gap: 8, textAlign: "left",
+                          transition: "all 0.12s",
+                        }}
                       >
-                        <div style={{ width: 28, height: 28, borderRadius: 5, background: active ? "#fff" : "#f7f7f5", border: "1px solid #e3e3e2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 5, background: active ? "#fff" : "#f7f7f5", border: "1px solid #e3e3e2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: active ? "#0a6bc4" : "#9b9a97" }}>
                           {icon}
                         </div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: active ? activeColor : "#37352f" }}>{label}</div>
-                          <div style={{ fontSize: 10, color: active ? activeColor : "#9b9a97", opacity: active ? 0.8 : 1 }}>{sub}</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: active ? "#0a6bc4" : "#37352f" }}>{label}</div>
+                          <div style={{ fontSize: 10, color: active ? "#0a6bc4" : "#9b9a97", opacity: active ? 0.8 : 1 }}>{sub}</div>
                         </div>
                         {active && (
-                          <div style={{ width: 14, height: 14, borderRadius: "50%", background: activeColor, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#0a6bc4", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                             <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
                           </div>
                         )}
@@ -8094,13 +8646,109 @@ const generatePresenceWord = (theme, grp, grpCands) => {
                 </div>
               </div>
 
-              {/* Résumé */}
+              {/* ── Logo + Entreprise — masqué pour FICHES_F2 ── */}
+              {selectedMode !== "FICHES_F2" && (
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-start", borderTop: "1px solid #f0f0ee", paddingTop: 16 }}>
+                  <div
+                    onClick={() => logoInputRef.current.click()}
+                    style={{ width: 56, height: 56, border: "1px dashed #d3d3d1", borderRadius: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", background: "#fafaf9", flexShrink: 0, gap: 3 }}
+                  >
+                    {logoUrl
+                      ? <img src={logoUrl} style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 5 }} alt="logo" />
+                      : <>
+                          <ImageIcon size={16} color="#b7b6b2" />
+                          <span style={{ fontSize: 9, color: "#b7b6b2", fontWeight: 500 }}>Logo</span>
+                        </>
+                    }
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b6b6b", marginBottom: 5 }}>Nom de l'entreprise</label>
+                    <input
+                      value={entreprise}
+                      onChange={e => setEntreprise(e.target.value)}
+                      placeholder="Ex : SAFRAN Maroc…"
+                      style={{ width: "100%", boxSizing: "border-box", padding: "8px 11px", border: "1px solid #e3e3e2", borderRadius: 6, fontSize: 13, color: "#37352f", outline: "none", fontFamily: "inherit" }}
+                    />
+                    <p style={{ fontSize: 11, color: "#b7b6b2", margin: "5px 0 0" }}>Apparaîtra sur chaque liste d'émargement</p>
+                  </div>
+                  <input type="file" ref={logoInputRef} onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file) { const reader = new FileReader(); reader.onload = (ev) => setLogoUrl(ev.target.result); reader.readAsDataURL(file); }
+                  }} style={{ display: "none" }} accept="image/*" />
+                </div>
+              )}
+
+              {/* ── Format — masqué pour FICHES_F2 ── */}
+              {selectedMode !== "FICHES_F2" && (
+                <div style={{ borderTop: "1px solid #f0f0ee", paddingTop: 16 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#6b6b6b", marginBottom: 8 }}>Format de sortie</label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {[
+                      {
+                        key: "pdf",
+                        label: "Fichier PDF",
+                        sub: "Impression directe",
+                        activeColor: "#0f7ddb",
+                        activeBg: "#f0f7ff",
+                        icon: (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d44c47" strokeWidth="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                          </svg>
+                        ),
+                      },
+                      {
+                        key: "word",
+                        label: "Fichier Word",
+                        sub: "Éditable",
+                        activeColor: "#2b579a",
+                        activeBg: "#f0f4fa",
+                        icon: (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2b579a" strokeWidth="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                          </svg>
+                        ),
+                      },
+                    ].map(({ key, label, sub, activeColor, activeBg, icon }) => {
+                      const active = format === key;
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => setFormat(key)}
+                          style={{ ...btnBase, padding: "10px 12px", borderRadius: 6, border: `${active ? "1.5px" : "1px"} solid ${active ? activeColor : "#e3e3e2"}`, background: active ? activeBg : "#fff", display: "flex", alignItems: "center", gap: 8, textAlign: "left", transition: "all 0.12s" }}
+                        >
+                          <div style={{ width: 28, height: 28, borderRadius: 5, background: active ? "#fff" : "#f7f7f5", border: "1px solid #e3e3e2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            {icon}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: active ? activeColor : "#37352f" }}>{label}</div>
+                            <div style={{ fontSize: 10, color: active ? activeColor : "#9b9a97", opacity: active ? 0.8 : 1 }}>{sub}</div>
+                          </div>
+                          {active && (
+                            <div style={{ width: 14, height: 14, borderRadius: "50%", background: activeColor, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Résumé ── */}
               <div style={{ background: "#fafaf9", border: "1px solid #f0f0ee", borderRadius: 6, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8 }}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9b9a97" strokeWidth="2" style={{ flexShrink: 0 }}>
                   <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                 </svg>
                 <span style={{ fontSize: 12, color: "#6b6b6b" }}>
-                  <b style={{ color: "#37352f", fontWeight: 600 }}>{totalCount} listes</b> seront générées — une par groupe et par thème
+                  {selectedMode === "FICHES_F2"
+                    ? <><b style={{ color: "#37352f", fontWeight: 600 }}>{themes.length} fiches F2</b> seront générées en Word — une par thème</>
+                    : <><b style={{ color: "#37352f", fontWeight: 600 }}>{totalCount} listes</b> seront générées — une par groupe et par thème</>
+                  }
                 </span>
               </div>
             </>
@@ -8109,7 +8757,7 @@ const generatePresenceWord = (theme, grp, grpCands) => {
             <div style={{ padding: "4px 0" }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 8 }}>
                 <span style={{ fontWeight: 500, color: "#37352f" }}>{progress.label}</span>
-                <span style={{ color: "#9b9a97" }}>{progress.current} / {totalCount}</span>
+                <span style={{ color: "#9b9a97" }}>{progress.current} / {progress.total}</span>
               </div>
               <div style={{ height: 4, background: "#f0f0ee", borderRadius: 4, overflow: "hidden" }}>
                 <div style={{ height: "100%", background: done ? "#3b6d11" : "#37352f", width: `${pct}%`, transition: "width 0.3s ease", borderRadius: 4 }} />
@@ -8140,20 +8788,16 @@ const generatePresenceWord = (theme, grp, grpCands) => {
           {progress.current === 0 && (
             <button
               onClick={handleStart}
-              disabled={!entreprise.trim()}
+              disabled={selectedMode !== "FICHES_F2" && !entreprise.trim()}
               style={{
                 ...btnBase,
-                padding: "7px 16px",
-                borderRadius: 6,
-                border: `1px solid ${!entreprise.trim() ? "#d3d3d1" : "#0a6bc4"}`,
-                background: !entreprise.trim() ? "#e9e9e7" : "#0f7ddb",
-                fontSize: 13,
-                fontWeight: 500,
-                color: !entreprise.trim() ? "#9b9a97" : "#fff",
-                cursor: !entreprise.trim() ? "not-allowed" : "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
+                padding: "7px 16px", borderRadius: 6,
+                border: `1px solid ${(selectedMode !== "FICHES_F2" && !entreprise.trim()) ? "#d3d3d1" : "#0a6bc4"}`,
+                background: (selectedMode !== "FICHES_F2" && !entreprise.trim()) ? "#e9e9e7" : "#0f7ddb",
+                fontSize: 13, fontWeight: 500,
+                color: (selectedMode !== "FICHES_F2" && !entreprise.trim()) ? "#9b9a97" : "#fff",
+                cursor: (selectedMode !== "FICHES_F2" && !entreprise.trim()) ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", gap: 6,
                 transition: "background 0.12s",
               }}
             >
@@ -8162,7 +8806,10 @@ const generatePresenceWord = (theme, grp, grpCands) => {
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              Télécharger les {totalCount} listes
+              {selectedMode === "FICHES_F2"
+                ? `Télécharger les ${themes.length} fiches F2`
+                : `Télécharger les ${totalCount} listes`
+              }
             </button>
           )}
         </div>
@@ -8264,27 +8911,22 @@ const handleExportWord = () => {
     ? `${workDays.map(d => String(d.getDate()).padStart(2, '0')).join('-')}/${String(workDays[0].getMonth() + 1).padStart(2, '0')}/${workDays[0].getFullYear()}`
     : "________________";
 
-  const MAX_LOGO_HEIGHT = 50; // ✅ Hauteur max du logo en pixels
+  const MAX_LOGO_HEIGHT = 50;
 
   const getLogoHtml = () => {
     if (!logoUrl) return Promise.resolve("<b>LOGO</b>");
-    
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
         const naturalW = img.naturalWidth;
         const naturalH = img.naturalHeight;
-
-        // ✅ Redimensionner proportionnellement si trop grand
         let finalW = naturalW;
         let finalH = naturalH;
-
         if (naturalH > MAX_LOGO_HEIGHT) {
           const ratio = MAX_LOGO_HEIGHT / naturalH;
           finalH = MAX_LOGO_HEIGHT;
           finalW = Math.round(naturalW * ratio);
         }
-
         resolve(`<img src="${logoUrl}" width="${finalW}" height="${finalH}" style="width:${finalW}px; height:${finalH}px;">`);
       };
       img.onerror = () => resolve(`<img src="${logoUrl}" width="110" height="50">`);
@@ -8292,75 +8934,39 @@ const handleExportWord = () => {
     });
   };
 
-  getLogoHtml().then((logoHtml) => {
+  getLogoHtml().then(async (logoHtml) => { // Ajout de async ici
     const html = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
       <head>
         <meta charset="UTF-8">
-        <!--[if gte mso 9]>
-        <xml>
-          <w:WordDocument>
-            <w:View>Print</w:View>
-            <w:Zoom>100</w:Zoom>
-            <w:DoNotOptimizeForBrowser/>
-          </w:WordDocument>
-        </xml>
-        <![endif]-->
         <style>
-          @page Section1 {
-            size: 841.9pt 595.3pt;
-            mso-page-orientation: landscape;
-            margin: 1.5cm 1.5cm 1.5cm 1.5cm;
-          }
+          @page Section1 { size: 841.9pt 595.3pt; mso-page-orientation: landscape; margin: 1.5cm 1.5cm 1.5cm 1.5cm; }
           div.Section1 { page: Section1; }
-
           body { font-family: Arial, sans-serif; font-size: 10pt; margin: 0; padding: 0; }
           table { border-collapse: collapse; width: 100%; }
-
           .main-table th, .main-table td { border: 0.5pt solid black; padding: 3px 5px; font-size: 8.5pt; }
           .header-bg { background-color: #DCE6F1; font-weight: bold; text-align: center; }
-
           .title { font-size: 13pt; font-weight: bold; text-align: center; font-style: italic; text-transform: uppercase; }
           .sig-text { font-size: 9.5pt; }
           .legend-text { font-size: 8.5pt; }
-
           td.no-border, th.no-border { border: none !important; }
         </style>
       </head>
       <body>
         <div class="Section1">
-
-          <!-- TITRE -->
           <p class="title" style="margin:0 0 6px 0;">LISTE DE PRESENCE PAR ACTION ET PAR GROUPE</p>
-
-          <!-- HEADER LOGO -->
           <table style="border-collapse:collapse; width:100%; margin-bottom:8px;">
-            <tr>
-              <td class="no-border" style="width:15%; vertical-align:middle;">
-                ${logoHtml}
-              </td>
-              <td class="no-border" style="width:85%;"></td>
-            </tr>
+            <tr><td class="no-border" style="width:15%; vertical-align:middle;">${logoHtml}</td><td class="no-border" style="width:85%;"></td></tr>
           </table>
-
-          <!-- INFOS -->
           <table style="border-collapse:collapse; width:100%; margin-bottom:8px;">
             <tr>
               <td class="no-border" style="width:130px; font-weight:bold;">Entreprise</td>
               <td class="no-border">: ${entreprise || "________________"}</td>
               <td class="no-border" style="text-align:right; font-weight:bold;">G ${grp}</td>
             </tr>
-            <tr>
-              <td class="no-border" style="font-weight:bold;">Thème de l'action</td>
-              <td class="no-border" colspan="2">: ${theme}</td>
-            </tr>
-            <tr>
-              <td class="no-border" style="font-weight:bold;">Jours de réalisation</td>
-              <td class="no-border" colspan="2">: ${dateStr}</td>
-            </tr>
+            <tr><td class="no-border" style="font-weight:bold;">Thème de l'action</td><td class="no-border" colspan="2">: ${theme}</td></tr>
+            <tr><td class="no-border" style="font-weight:bold;">Jours de réalisation</td><td class="no-border" colspan="2">: ${dateStr}</td></tr>
           </table>
-
-          <!-- TABLEAU PRINCIPAL -->
           <table class="main-table" style="margin-bottom:8px;">
             <thead>
               <tr class="header-bg">
@@ -8371,11 +8977,7 @@ const handleExportWord = () => {
                 <th colspan="3">C.S.P</th>
                 ${workDays.map(d => `<th rowspan="2">${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}</th>`).join('')}
               </tr>
-              <tr class="header-bg">
-                <th style="width:25px;">C</th>
-                <th style="width:25px;">E</th>
-                <th style="width:25px;">O</th>
-              </tr>
+              <tr class="header-bg"><th style="width:25px;">C</th><th style="width:25px;">E</th><th style="width:25px;">O</th></tr>
             </thead>
             <tbody>
               ${list.map(c => {
@@ -8386,46 +8988,57 @@ const handleExportWord = () => {
                     <td>${c.prenom || ""}</td>
                     <td align="center">${c.cin || ""}</td>
                     <td align="center"></td>
-                    <td align="center">${csp && csp === "C" ? "X" : ""}</td>
-<td align="center">${csp && csp === "E" ? "X" : ""}</td>
-<td align="center">${csp && csp === "O" ? "X" : ""}</td>
+                    <td align="center">${csp === "C" ? "X" : ""}</td>
+                    <td align="center">${csp === "E" ? "X" : ""}</td>
+                    <td align="center">${csp === "O" ? "X" : ""}</td>
                     ${workDays.map(() => `<td></td>`).join('')}
-                  </tr>
-                `;
+                  </tr>`;
               }).join('')}
             </tbody>
           </table>
-
-          <!-- LÉGENDES -->
           <p class="legend-text" style="margin:2px 0;">(*) C.S.P : Catégorie socio-professionnelle</p>
           <p class="legend-text" style="margin:2px 0;">C: Cadre – E: Employé – O: Ouvrier</p>
-
           <br/>
-
-          <!-- SIGNATURES -->
           <table style="border-collapse:collapse; width:100%; margin-top:6px;">
             <tr>
-              <td class="no-border" style="width:50%; text-align:left; vertical-align:top;" class="sig-text">
-                Cachet de l'organisme de formation<br/>
-                et identité du signataire
-              </td>
-              <td class="no-border" style="width:50%; text-align:right; vertical-align:top;" class="sig-text">
-                Cachet et signature du responsable<br/>
-                de formation de l'entreprise
-              </td>
+              <td class="no-border" style="width:50%; text-align:left; vertical-align:top;" class="sig-text">Cachet de l'organisme de formation<br/>et identité du signataire</td>
+              <td class="no-border" style="width:50%; text-align:right; vertical-align:top;" class="sig-text">Cachet et signature du responsable<br/>de formation de l'entreprise</td>
             </tr>
           </table>
-
         </div>
       </body>
       </html>
     `;
 
-    const blob = new Blob(["\ufeff", html], { type: "application/msword;charset=utf-8" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `Liste_Presence_${theme}_G${grp}.doc`;
-    link.click();
+    const fileName = `Liste_Presence_${theme}_G${grp}.doc`;
+
+    // --- LOGIQUE HYBRIDE WEB / DESKTOP ---
+    if (window.__TAURI_METADATA__) {
+      // MODE DESKTOP (Tauri)
+      try {
+        const path = await save({
+          defaultPath: fileName,
+          filters: [{ name: 'Word Document', extensions: ['doc'] }]
+        });
+
+        if (path) {
+          // Conversion de la string HTML en Uint8Array avec BOM UTF-8
+          const encoder = new TextEncoder();
+          const uint8Array = encoder.encode("\ufeff" + html);
+          await writeBinaryFile(path, uint8Array);
+        }
+      } catch (err) {
+        console.error("Erreur lors de la sauvegarde du fichier Word:", err);
+      }
+    } else {
+      // MODE WEB (Navigateur classique)
+      const blob = new Blob(["\ufeff", html], { type: "application/msword;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
   });
 };
 
@@ -8550,7 +9163,8 @@ csp && csp === "O" ? "X" : "",
   doc.text("Cachet et signature du responsable", pageWidth - 15, footerY,     { align: "right" });
   doc.text("de formation de l'entreprise",        pageWidth - 15, footerY + 5, { align: "right" });
 
-  doc.save(`Presence_${theme.substring(0, 20).trim()}_G${grp}.pdf`);
+const pdfOutput = doc.output('arraybuffer');
+downloadFile(pdfOutput, `Presence_${theme.substring(0, 20).trim()}_G${grp}`, "pdf");
 };
 
   const formatDateHeader = (d) => {
@@ -8999,6 +9613,451 @@ csp && csp === "O" ? "X" : "",
   );
 }
 
+function isWeekendOrHoliday(date) {
+  const d = date.getDay();
+  return d === 0 || d === 6; // dimanche ou samedi
+}
+ 
+function workDaysBetween(dateStart, dateEnd, halfDay = false) {
+  if (!dateStart) return 0;
+  let current = new Date(dateStart + "T00:00:00");
+  const end    = new Date((dateEnd || dateStart) + "T00:00:00");
+  let jours = 0;
+  let safety = 0;
+  while (current <= end && safety < 200) {
+    safety++;
+    if (!isWeekendOrHoliday(current)) jours++;
+    current.setDate(current.getDate() + 1);
+  }
+  return halfDay ? jours * 0.5 : jours;
+}
+ 
+function renderF2Dates(grp) {
+  if (!grp.dateDebut) return "—";
+  const fmt = d => `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
+  if (!grp.dateFin || grp.dateDebut === grp.dateFin) {
+    return fmt(new Date(grp.dateDebut + "T00:00:00"));
+  }
+  let current = new Date(grp.dateDebut + "T00:00:00");
+  const end   = new Date(grp.dateFin   + "T00:00:00");
+  const days  = [];
+  let safety  = 0;
+  while (current <= end && safety < 200) {
+    safety++;
+    if (!isWeekendOrHoliday(current)) days.push(new Date(current));
+    current.setDate(current.getDate() + 1);
+  }
+  if (!days.length) return "—";
+  const last = days[days.length - 1];
+  const suffix = `/${String(last.getMonth()+1).padStart(2,"0")}/${last.getFullYear()}`;
+  const dayNums = days.map(d => String(d.getDate()).padStart(2,"0")).join(";");
+  return `${dayNums}${suffix}`;
+}
+ 
+/* ─── constantes DXA ──────────────────────────────────────────────────────── */
+// A4 = 11 906 × 16 838 DXA  |  marges 10 mm = 567 DXA  |  contenu = 10 772 DXA
+const PAGE_W   = 11906;
+const PAGE_H   = 16838;
+const MARGIN   = 567;          // ~10 mm
+const CONTENT  = PAGE_W - MARGIN * 2;  // 10 772
+ 
+/* ─── couleurs ────────────────────────────────────────────────────────────── */
+const BLUE  = "003366";
+const BLACK = "000000";
+const WHITE = "FFFFFF";
+ 
+/* ─── border helper ──────────────────────────────────────────────────────── */
+function border(color = BLACK, size = 4) {
+  return { style: docx.BorderStyle.SINGLE, size, color };
+}
+function allBorders(color = BLACK, size = 4) {
+  const b = border(color, size);
+  return { top: b, bottom: b, left: b, right: b };
+}
+function noBorders() {
+  const b = { style: docx.BorderStyle.NONE, size: 0, color: WHITE };
+  return { top: b, bottom: b, left: b, right: b };
+}
+ 
+/* ─── paragraph helpers ──────────────────────────────────────────────────── */
+function para(runs, opts = {}) {
+  return new docx.Paragraph({
+    alignment: opts.align || docx.AlignmentType.LEFT,
+    spacing:   opts.spacing || { before: 0, after: 0 },
+    children:  Array.isArray(runs) ? runs : [runs],
+    ...opts.extra,
+  });
+}
+ 
+function run(text, opts = {}) {
+  return new docx.TextRun({
+    text:  text || "",
+    font:  "Arial",
+    size:  opts.size  || 20,          // 10 pt par défaut (demi-points)
+    bold:  opts.bold  || false,
+    color: opts.color || BLACK,
+    ...opts.extra,
+  });
+}
+ 
+/* ─── cell helper ────────────────────────────────────────────────────────── */
+function cell(children, width, opts = {}) {
+  return new docx.TableCell({
+    width:   { size: width, type: docx.WidthType.DXA },
+    borders: opts.borders || allBorders(),
+    shading: opts.shading
+      ? { fill: opts.shading, type: docx.ShadingType.CLEAR }
+      : undefined,
+    margins: { top: 60, bottom: 60, left: 100, right: 100 },
+    verticalAlign: opts.vAlign || docx.VerticalAlign.CENTER,
+    columnSpan: opts.span,
+    rowSpan:    opts.rowSpan,
+    children:   Array.isArray(children) ? children : [children],
+  });
+}
+ 
+function headerCell(text, width, opts = {}) {
+  return cell(
+    para(run(text, { size: opts.size || 20, bold: opts.bold || false, color: opts.color || BLUE }),
+      { align: opts.align || docx.AlignmentType.LEFT }),
+    width, opts
+  );
+}
+ 
+function dataCell(text, width, opts = {}) {
+  return cell(
+    para(run(String(text || ""), { size: 20, bold: opts.bold || false }),
+      { align: opts.align || docx.AlignmentType.LEFT }),
+    width, opts
+  );
+}
+ 
+/* ══════════════════════════════════════════════════════════════════════════
+   FONCTION PRINCIPALE
+══════════════════════════════════════════════════════════════════════════ */
+async function exportFicheToWord(form, groupeRows, currentGroups, currentCandidats, groupsPerPage) {
+ 
+  /* ── effectifs ── */
+  const classifyCSP = (csp = "") => {
+    const v = (csp || "").toLowerCase().trim();
+    if (["ingénieur","cadre","cadres","manager"].some(k => v.includes(k))) return "cadres";
+    if (["superviseur","agent de maitrise","technicien","employé","employe"].some(k => v.includes(k))) return "employes";
+    if (["ouvrier","opérateur"].some(k => v.includes(k))) return "ouvriers";
+    return "cadres";
+  };
+  const cadresCurrent   = currentCandidats.filter(c => classifyCSP(c.extraData?.csp) === "cadres").length;
+  const employesCurrent = currentCandidats.filter(c => classifyCSP(c.extraData?.csp) === "employes").length;
+  const ouvriersCurrent = currentCandidats.filter(c => classifyCSP(c.extraData?.csp) === "ouvriers").length;
+  const total           = currentCandidats.length;
+ 
+  /* ── coût ── */
+  const prix = parseFloat(String(form.cout || "0").replace(/\s/g,"").replace(",",".")) || 0;
+  const totalJours = currentGroups.reduce((acc, g) => {
+    return acc + workDaysBetween(g.dateDebut, g.dateFin, g.halfDay);
+  }, 0);
+  const coutTotal = prix * totalJours;
+  const coutAffiche = coutTotal.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " MAD";
+ 
+  /* ══ EN-TÊTE ══ */
+  const headerTitle = para(
+    run("Contrats Spéciaux de Formation", { size: 22, bold: true }),
+    { align: docx.AlignmentType.LEFT }
+  );
+ 
+  const formulaireTitle = para(
+    run("Formulaire F2", { size: 22, bold: true }),
+    { align: docx.AlignmentType.CENTER, spacing: { before: 40, after: 0 } }
+  );
+ 
+  const dividerLine = new docx.Paragraph({
+    border: { bottom: { style: docx.BorderStyle.SINGLE, size: 12, color: BLACK } },
+    spacing: { before: 40, after: 0 },
+    children: [],
+  });
+ 
+  const ficheTitle = para(
+    run("Fiche d'identification de l'action de formation", { size: 20 }),
+    { align: docx.AlignmentType.CENTER, spacing: { before: 60, after: 80 } }
+  );
+ 
+  /* ══ BLOC 1 : IDENTIFICATION ══ */
+  const bloc1 = new docx.Table({
+    width: { size: CONTENT, type: docx.WidthType.DXA },
+    columnWidths: [CONTENT],
+    rows: [
+      new docx.TableRow({ children: [headerCell("Domaine de Formation : (selon la NDF*)", CONTENT, { bold: true })] }),
+      new docx.TableRow({ children: [dataCell(form.domaine || "Technique", CONTENT)] }),
+      new docx.TableRow({ children: [headerCell("Thème de l'Action :", CONTENT, { bold: true })] }),
+      new docx.TableRow({ children: [dataCell(form.theme, CONTENT, { bold: true })] }),
+      new docx.TableRow({ children: [headerCell("Objectif (compétence visée) :", CONTENT, { bold: true })] }),
+      new docx.TableRow({ children: [
+        cell(
+          (form.objectif || "").split("\n").filter(l => l.trim()).map(l =>
+            para(run(l.trim()), { spacing: { before: 0, after: 30 } })
+          ),
+          CONTENT, { vAlign: docx.VerticalAlign.TOP }
+        )
+      ]}),
+      new docx.TableRow({ children: [headerCell("Contenu indicatif", CONTENT, { bold: true })] }),
+      new docx.TableRow({ children: [
+        cell(
+          (form.contenu || "").split("\n").filter(l => l.trim()).map(l => {
+            const txt = l.trim().startsWith("-") ? l.trim() : `- ${l.trim()}`;
+            return para(run(txt), { spacing: { before: 0, after: 30 } });
+          }).concat(
+            // hauteur min ~80px ≈ 3 lignes vides si peu de contenu
+            Array.from({ length: Math.max(0, 5 - (form.contenu || "").split("\n").filter(l => l.trim()).length) })
+              .map(() => para(run(" "), { spacing: { before: 0, after: 60 } }))
+          ),
+          CONTENT, { vAlign: docx.VerticalAlign.TOP }
+        )
+      ]}),
+    ],
+  });
+ 
+  /* ══ BLOC 2 : EFFECTIF ══ */
+  const q = Math.floor(CONTENT / 4);
+  const bloc2 = new docx.Table({
+    width: { size: CONTENT, type: docx.WidthType.DXA },
+    columnWidths: [q, q, q, q],
+    rows: [
+      new docx.TableRow({ children: [
+        new docx.TableCell({
+          columnSpan: 4,
+          width: { size: CONTENT, type: docx.WidthType.DXA },
+          borders: allBorders(),
+          margins: { top: 60, bottom: 60, left: 100, right: 100 },
+          children: [para(run("Effectif global de la population concernée :", { bold: true, color: BLUE }))],
+        }),
+      ]}),
+      new docx.TableRow({ children: [
+        dataCell("Cadres",   q, { align: docx.AlignmentType.CENTER }),
+        dataCell("Employés", q, { align: docx.AlignmentType.CENTER }),
+        dataCell("Ouvriers", q, { align: docx.AlignmentType.CENTER }),
+        dataCell("Total",    q, { align: docx.AlignmentType.CENTER }),
+      ]}),
+      new docx.TableRow({ children: [
+        dataCell(cadresCurrent,   q, { align: docx.AlignmentType.CENTER, bold: true }),
+        dataCell(employesCurrent, q, { align: docx.AlignmentType.CENTER, bold: true }),
+        dataCell(ouvriersCurrent, q, { align: docx.AlignmentType.CENTER, bold: true }),
+        dataCell(total,           q, { align: docx.AlignmentType.CENTER, bold: true }),
+      ]}),
+    ],
+  });
+ 
+  /* ══ BLOC 3 : ORGANISME ══ */
+  const w1 = Math.floor(CONTENT * 0.28);
+  const w2 = CONTENT - w1;
+  const bloc3 = new docx.Table({
+    width: { size: CONTENT, type: docx.WidthType.DXA },
+    columnWidths: [w1, w2],
+    rows: [
+      new docx.TableRow({ children: [
+        new docx.TableCell({
+          columnSpan: 2,
+          width: { size: CONTENT, type: docx.WidthType.DXA },
+          borders: allBorders(),
+          margins: { top: 60, bottom: 60, left: 100, right: 100 },
+          children: [para(run("Organisme de Formation :", { bold: true, color: BLUE }))],
+        }),
+      ]}),
+      new docx.TableRow({ children: [
+        dataCell("Raison sociale :", w1),
+        dataCell(form.cabinet || "", w2),
+      ]}),
+      new docx.TableRow({ children: [
+        dataCell("N°CNSS :", w1),
+        dataCell(form.cnss || "", w2),
+      ]}),
+    ],
+  });
+ 
+  /* ══ BLOC 4 : TYPE DE FORMATION ══ */
+  const isIntra = form.typeFormation === "Intra-entreprise";
+  const checkboxChar = (checked) => checked ? "☑" : "☐";
+  const bloc4 = new docx.Table({
+    width: { size: CONTENT, type: docx.WidthType.DXA },
+    columnWidths: [w1, w2],
+    rows: [
+      new docx.TableRow({ children: [
+        dataCell("Type de formation :", w1),
+        cell(
+          para([
+            run(`${checkboxChar(isIntra)}  Intra-entreprise       ${checkboxChar(!isIntra)}  Inter-entreprises`, { size: 20 })
+          ]),
+          w2
+        ),
+      ]}),
+    ],
+  });
+ 
+  /* ══ BLOC 5 : COÛT ══ */
+  const wC1 = Math.floor(CONTENT * 0.32);
+  const wC2 = CONTENT - wC1;
+  const bloc5 = new docx.Table({
+    width: { size: CONTENT, type: docx.WidthType.DXA },
+    columnWidths: [wC1, wC2],
+    rows: [
+      new docx.TableRow({ children: [
+        cell(
+          para(run("Coût de la Formation HT :", { bold: true, color: BLUE }),
+            { align: docx.AlignmentType.CENTER }),
+          wC1
+        ),
+        dataCell(coutAffiche, wC2, { bold: true }),
+      ]}),
+    ],
+  });
+ 
+  /* ══ BLOC 6 : TABLEAU DES GROUPES ══ */
+  const colGrp  = Math.floor(CONTENT * 0.11);
+  const colEff  = Math.floor(CONTENT * 0.09);
+  const colDate = Math.floor(CONTENT * 0.25);
+  const colHd   = Math.floor(CONTENT * 0.11);
+  const colHf   = Math.floor(CONTENT * 0.11);
+  const colLieu = CONTENT - colGrp - colEff - colDate - colHd - colHf;
+  const colWidths = [colGrp, colEff, colDate, colHd, colHf, colLieu];
+ 
+  const thCell = (txt, w) => cell(
+    para(run(txt, { size: 18 }), { align: docx.AlignmentType.CENTER }),
+    w
+  );
+ 
+  const headerRow = new docx.TableRow({
+    children: [
+      thCell("Groupe Module", colGrp),
+      thCell("Effectif",      colEff),
+      thCell("Les Dates",     colDate),
+      thCell("Heure Début",   colHd),
+      thCell("Heure Fin",     colHf),
+      thCell("Lieu",          colLieu),
+    ],
+  });
+ 
+  const dataRows = [];
+  const totalRows = Math.max(currentGroups.length, groupsPerPage);
+ 
+  for (let i = 0; i < totalRows; i++) {
+    const g = currentGroups[i];
+ 
+    if (!g) {
+      // ligne vide
+      dataRows.push(new docx.TableRow({
+        children: [
+          dataCell("", colGrp),
+          dataCell("", colEff),
+          dataCell("", colDate),
+          dataCell("", colHd),
+          dataCell("", colHf),
+          ...(i === 0 ? [] : []), // lieu géré en rowspan sur la première ligne
+        ],
+      }));
+      continue;
+    }
+ 
+    let hDebut = form.heureDebut || "09:00";
+    let hFin   = form.heureFin   || "17:00";
+    if (g.halfDay) {
+      if (g.slot === "matin")       { hDebut = "09:00"; hFin = "12:00"; }
+      if (g.slot === "après-midi")  { hDebut = "14:00"; hFin = "17:00"; }
+    }
+ 
+    const isFirst = i === 0;
+    const children = [
+      dataCell(String(g.groupe).padStart(2,"0"), colGrp, { align: docx.AlignmentType.CENTER }),
+      dataCell(g.effectif, colEff, { align: docx.AlignmentType.CENTER }),
+      dataCell(renderF2Dates(g), colDate, { align: docx.AlignmentType.CENTER }),
+      dataCell(hDebut, colHd, { align: docx.AlignmentType.CENTER }),
+      dataCell(hFin,   colHf, { align: docx.AlignmentType.CENTER }),
+    ];
+ 
+    if (isFirst) {
+      children.push(new docx.TableCell({
+        width:     { size: colLieu, type: docx.WidthType.DXA },
+        borders:   allBorders(),
+        rowSpan:   totalRows + 1, // +1 pour la ligne pause
+        margins:   { top: 60, bottom: 60, left: 100, right: 100 },
+        verticalAlign: docx.VerticalAlign.TOP,
+        children:  [para(run(form.lieu || "", { size: 18 }))],
+      }));
+    }
+ 
+    dataRows.push(new docx.TableRow({ children }));
+  }
+ 
+  // ligne pause déjeuner
+  const pauseRow = new docx.TableRow({
+    children: [
+      dataCell("", colGrp),
+      dataCell("", colEff),
+      dataCell("", colDate),
+      new docx.TableCell({
+        columnSpan: 2,
+        width: { size: colHd + colHf, type: docx.WidthType.DXA },
+        borders: allBorders(),
+        margins: { top: 60, bottom: 60, left: 100, right: 100 },
+        verticalAlign: docx.VerticalAlign.CENTER,
+        children: [para(run("Pause déjeunée de 12 h à 14 h", { size: 18 }),
+          { align: docx.AlignmentType.CENTER })],
+      }),
+    ],
+  });
+ 
+  const bloc6 = new docx.Table({
+    width: { size: CONTENT, type: docx.WidthType.DXA },
+    columnWidths: colWidths,
+    rows: [headerRow, ...dataRows, pauseRow],
+  });
+ 
+  /* ══ ASSEMBLAGE ══ */
+  const spacer = new docx.Paragraph({
+    spacing: { before: 100, after: 100 },
+    children: [],
+  });
+ 
+  const doc = new docx.Document({
+    styles: {
+      default: {
+        document: { run: { font: "Arial", size: 20, color: BLACK } },
+      },
+    },
+    sections: [{
+      properties: {
+        page: {
+          size:   { width: PAGE_W, height: PAGE_H },
+          margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN },
+        },
+      },
+      children: [
+        headerTitle,
+        formulaireTitle,
+        dividerLine,
+        ficheTitle,
+        bloc1, spacer,
+        bloc2, spacer,
+        bloc3, spacer,
+        bloc4, spacer,
+        bloc5, spacer,
+        bloc6,
+      ],
+    }],
+  });
+ 
+  /* ══ TÉLÉCHARGEMENT ══ */
+  const buffer = await docx.Packer.toBlob(doc);
+  const url    = URL.createObjectURL(buffer);
+  const a      = document.createElement("a");
+  a.href       = url;
+  a.download   = `FicheTechnique_${(form.theme || "F2").replace(/\s+/g, "_")}.docx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+ 
+// Export pour usage en module ou navigateur
+if (typeof module !== "undefined") module.exports = { exportFicheToWord }
+
 function FicheTechniqueDesigner({ doc, candidats, tasks, onClose }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [groupsPerPage, setGroupsPerPage] = useState(5);
@@ -9145,6 +10204,295 @@ function FicheTechniqueDesigner({ doc, candidats, tasks, onClose }) {
     background: "#fff", boxSizing: "border-box",
   };
 
+  const exportFicheToWordInline = async (form, currentGroups, currentCandidats, groupsPerPage) => {
+
+  /* ── Helpers ── */
+  const isWeekend = d => d.getDay() === 0 || d.getDay() === 6;
+
+  const workDaysBetween = (ds, de, half = false) => {
+    if (!ds) return 0;
+    let cur = new Date(ds + "T00:00:00");
+    const end = new Date((de || ds) + "T00:00:00");
+    let j = 0, s = 0;
+    while (cur <= end && s < 200) { s++; if (!isWeekend(cur)) j++; cur.setDate(cur.getDate() + 1); }
+    return half ? j * 0.5 : j;
+  };
+
+  const renderDates = grp => {
+    if (!grp.dateDebut) return "—";
+    const fmt = d => `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
+    if (!grp.dateFin || grp.dateDebut === grp.dateFin) return fmt(new Date(grp.dateDebut + "T00:00:00"));
+    let cur = new Date(grp.dateDebut + "T00:00:00");
+    const end = new Date(grp.dateFin + "T00:00:00");
+    const days = []; let s = 0;
+    while (cur <= end && s < 200) { s++; if (!isWeekend(cur)) days.push(new Date(cur)); cur.setDate(cur.getDate() + 1); }
+    if (!days.length) return "—";
+    const last = days[days.length - 1];
+    return days.map(d => String(d.getDate()).padStart(2,"0")).join(";") +
+      `/${String(last.getMonth()+1).padStart(2,"0")}/${last.getFullYear()}`;
+  };
+
+  /* ── Constantes page A4, marges 10mm ── */
+  const PAGE_W = 11906, PAGE_H = 16838, MARGIN = 567;
+  const CONTENT = PAGE_W - MARGIN * 2;
+  const BLUE = "003366", BLACK = "000000";
+
+  /* ── Helpers docx ── */
+  const bdr = (color = BLACK, size = 4) => ({ style: BorderStyle.SINGLE, size, color });
+  const allBdr = () => { const b = bdr(); return { top: b, bottom: b, left: b, right: b }; };
+
+  const mkPara = (runs, opts = {}) => new Paragraph({
+    alignment: opts.align || AlignmentType.LEFT,
+    spacing: opts.spacing || { before: 0, after: 0 },
+    children: Array.isArray(runs) ? runs : [runs],
+    ...(opts.border ? { border: opts.border } : {}),
+  });
+
+  const mkRun = (text, opts = {}) => new TextRun({
+    text: text || "", font: "Arial",
+    size: opts.size ?? 20, bold: opts.bold ?? false, color: opts.color ?? BLACK,
+  });
+
+  const mkCell = (children, width, opts = {}) => new TableCell({
+    width: { size: width, type: WidthType.DXA },
+    borders: opts.borders ?? allBdr(),
+    shading: opts.shading ? { fill: opts.shading, type: ShadingType.CLEAR } : undefined,
+    margins: { top: 60, bottom: 60, left: 100, right: 100 },
+    verticalAlign: opts.vAlign ?? VerticalAlign.CENTER,
+    columnSpan: opts.span, rowSpan: opts.rowSpan,
+    children: Array.isArray(children) ? children : [children],
+  });
+
+  const lCell = (text, width, opts = {}) => mkCell(
+    mkPara(mkRun(text, { bold: opts.bold ?? false, color: opts.color ?? BLUE, size: 20 }),
+      { align: AlignmentType.LEFT }), width, opts
+  );
+
+  const dCell = (text, width, opts = {}) => mkCell(
+    mkPara(mkRun(String(text ?? ""), { bold: opts.bold ?? false, size: 20 }),
+      { align: opts.align ?? AlignmentType.LEFT }), width, opts
+  );
+
+  /* ── Effectifs ── */
+  const classifyCSP = (csp = "") => {
+    const v = (csp || "").toLowerCase();
+    if (["ingénieur","cadre","cadres","manager"].some(k => v.includes(k))) return "cadres";
+    if (["superviseur","technicien","employé","employe"].some(k => v.includes(k))) return "employes";
+    if (["ouvrier","opérateur"].some(k => v.includes(k))) return "ouvriers";
+    return "cadres";
+  };
+  const cadresCt   = currentCandidats.filter(c => classifyCSP(c.extraData?.csp) === "cadres").length;
+  const employesCt = currentCandidats.filter(c => classifyCSP(c.extraData?.csp) === "employes").length;
+  const ouvriersCt = currentCandidats.filter(c => classifyCSP(c.extraData?.csp) === "ouvriers").length;
+  const total      = currentCandidats.length;
+
+  /* ── Coût ── */
+  const prix = parseFloat(String(form.cout || "0").replace(/\s/g,"").replace(",",".")) || 0;
+  const totalJours = currentGroups.reduce((acc, g) => acc + workDaysBetween(g.dateDebut, g.dateFin, g.halfDay), 0);
+  const coutAffiche = (prix * totalJours).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " MAD";
+
+  /* ── En-tête ── */
+  const spacer = new Paragraph({ spacing: { before: 80, after: 80 }, children: [] });
+
+  /* ── Bloc 1 : Identification ── */
+  const objectifLines = (form.objectif || "").split("\n").filter(l => l.trim())
+    .map(l => mkPara(mkRun(l.trim()), { spacing: { before: 0, after: 30 } }));
+  if (!objectifLines.length) objectifLines.push(mkPara(mkRun(" ")));
+
+  const contenuLines = (form.contenu || "").split("\n").filter(l => l.trim())
+    .map(l => mkPara(mkRun(l.trim().startsWith("-") ? l.trim() : `- ${l.trim()}`), { spacing: { before: 0, after: 30 } }));
+  for (let i = 0; i < 3; i++)
+  contenuLines.push(mkPara(mkRun(" "), { spacing: { before: 0, after: 60 } }));
+
+  const bloc1 = new Table({
+    width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [CONTENT],
+    rows: [
+      new TableRow({ children: [lCell("Domaine de Formation : (selon la NDF*)", CONTENT, { bold: true })] }),
+      new TableRow({ children: [dCell(form.domaine || "Technique", CONTENT)] }),
+      new TableRow({ children: [lCell("Thème de l'Action :", CONTENT, { bold: true })] }),
+      new TableRow({ children: [dCell(form.theme || "", CONTENT, { bold: true })] }),
+      new TableRow({ children: [lCell("Objectif (compétence visée) :", CONTENT, { bold: true })] }),
+      new TableRow({ children: [mkCell(objectifLines, CONTENT, { vAlign: VerticalAlign.TOP })] }),
+      new TableRow({ children: [lCell("Contenu indicatif", CONTENT, { bold: true })] }),
+      new TableRow({ children: [mkCell(contenuLines, CONTENT, { vAlign: VerticalAlign.TOP })] }),
+    ],
+  });
+
+  /* ── Bloc 2 : Effectif ── */
+  const q = Math.floor(CONTENT / 4);
+  const bloc2 = new Table({
+    width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [q, q, q, q],
+    rows: [
+      new TableRow({ children: [new TableCell({
+        columnSpan: 4, width: { size: CONTENT, type: WidthType.DXA },
+        borders: allBdr(), margins: { top: 60, bottom: 60, left: 100, right: 100 },
+        children: [mkPara(mkRun("Effectif global de la population concernée :", { bold: true, color: BLUE }))],
+      })]}),
+      new TableRow({ children: [
+        dCell("Cadres", q, { align: AlignmentType.CENTER }),
+        dCell("Employés", q, { align: AlignmentType.CENTER }),
+        dCell("Ouvriers", q, { align: AlignmentType.CENTER }),
+        dCell("Total", q, { align: AlignmentType.CENTER }),
+      ]}),
+      new TableRow({ children: [
+        dCell(cadresCt,   q, { align: AlignmentType.CENTER, bold: true }),
+        dCell(employesCt, q, { align: AlignmentType.CENTER, bold: true }),
+        dCell(ouvriersCt, q, { align: AlignmentType.CENTER, bold: true }),
+        dCell(total,      q, { align: AlignmentType.CENTER, bold: true }),
+      ]}),
+    ],
+  });
+
+  /* ── Bloc 3 : Organisme ── */
+  const w1 = Math.floor(CONTENT * 0.28), w2 = CONTENT - w1;
+  const bloc3 = new Table({
+    width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [w1, w2],
+    rows: [
+      new TableRow({ children: [new TableCell({
+        columnSpan: 2, width: { size: CONTENT, type: WidthType.DXA },
+        borders: allBdr(), margins: { top: 60, bottom: 60, left: 100, right: 100 },
+        children: [mkPara(mkRun("Organisme de Formation :", { bold: true, color: BLUE }))],
+      })]}),
+      new TableRow({ children: [dCell("Raison sociale :", w1), dCell(form.cabinet || "", w2)] }),
+      new TableRow({ children: [dCell("N°CNSS :", w1),        dCell(form.cnss    || "", w2)] }),
+    ],
+  });
+
+  /* ── Bloc 4 : Type de formation ── */
+  const isIntra = form.typeFormation === "Intra-entreprise";
+  const chk = (v) => v ? "■" : "□";
+  const bloc4 = new Table({
+    width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [w1, w2],
+    rows: [new TableRow({ children: [
+      dCell("Type de formation :", w1),
+mkCell(
+  mkPara([
+    mkRun(`${chk(isIntra)} `, { size: 32 }),
+    mkRun(`Intra-entreprise       `, { size: 20 }),
+    mkRun(`${chk(!isIntra)} `, { size: 32 }),
+    mkRun(`Inter-entreprises`, { size: 20 }),
+  ]),
+  w2
+),    ]})],
+  });
+
+  /* ── Bloc 5 : Coût ── */
+  const wC1 = Math.floor(CONTENT * 0.32), wC2 = CONTENT - wC1;
+  const bloc5 = new Table({
+    width: { size: CONTENT, type: WidthType.DXA }, columnWidths: [wC1, wC2],
+    rows: [new TableRow({ children: [
+      mkCell(mkPara(mkRun("Coût de la Formation HT :", { bold: true, color: BLUE }), { align: AlignmentType.CENTER }), wC1),
+      dCell(coutAffiche, wC2, { bold: true }),
+    ]})],
+  });
+
+  /* ── Bloc 6 : Tableau des groupes ── */
+  const colGrp  = Math.floor(CONTENT * 0.11);
+  const colEff  = Math.floor(CONTENT * 0.09);
+  const colDate = Math.floor(CONTENT * 0.24);
+  const colHd   = Math.floor(CONTENT * 0.11);
+  const colHf   = Math.floor(CONTENT * 0.11);
+  const colLieu = CONTENT - colGrp - colEff - colDate - colHd - colHf;
+
+  const thCell = (txt, w) => mkCell(
+    mkPara(mkRun(txt, { size: 18 }), { align: AlignmentType.CENTER }), w
+  );
+
+  const headerRow = new TableRow({ children: [
+    thCell("Groupe Module", colGrp), thCell("Effectif", colEff),
+    thCell("Les Dates", colDate),    thCell("Heure Début", colHd),
+    thCell("Heure Fin", colHf),      thCell("Lieu", colLieu),
+  ]});
+
+  const totalRows = Math.max(currentGroups.length, groupsPerPage);
+  const dataRows  = [];
+
+  for (let i = 0; i < totalRows; i++) {
+    const g = currentGroups[i];
+    if (!g) {
+      dataRows.push(new TableRow({ children: [
+        dCell("", colGrp), dCell("", colEff), dCell("", colDate), dCell("", colHd), dCell("", colHf),
+      ]}));
+      continue;
+    }
+    let hDebut = form.heureDebut || "09:00";
+    let hFin   = form.heureFin   || "17:00";
+    if (g.halfDay) {
+      if (g.slot === "matin")      { hDebut = "09:00"; hFin = "12:00"; }
+      if (g.slot === "après-midi") { hDebut = "14:00"; hFin = "17:00"; }
+    }
+    const cols = [
+      dCell(String(g.groupe).padStart(2,"0"), colGrp, { align: AlignmentType.CENTER }),
+      dCell(g.effectif,                       colEff, { align: AlignmentType.CENTER }),
+      dCell(renderDates(g),                   colDate,{ align: AlignmentType.CENTER }),
+      dCell(hDebut,                           colHd,  { align: AlignmentType.CENTER }),
+      dCell(hFin,                             colHf,  { align: AlignmentType.CENTER }),
+    ];
+    if (i === 0) {
+      cols.push(new TableCell({
+        width: { size: colLieu, type: WidthType.DXA },
+        borders: allBdr(), rowSpan: totalRows + 1,
+        margins: { top: 60, bottom: 60, left: 100, right: 100 },
+        verticalAlign: VerticalAlign.TOP,
+        children: [mkPara(mkRun(form.lieu || "", { size: 18 }))],
+      }));
+    }
+    dataRows.push(new TableRow({ children: cols }));
+  }
+
+  const pauseRow = new TableRow({ children: [
+    dCell("", colGrp), dCell("", colEff), dCell("", colDate),
+    new TableCell({
+      columnSpan: 2, width: { size: colHd + colHf, type: WidthType.DXA },
+      borders: allBdr(), margins: { top: 60, bottom: 60, left: 100, right: 100 },
+      verticalAlign: VerticalAlign.CENTER,
+      children: [mkPara(mkRun("Pause déjeunée de 12 h à 14 h", { size: 18 }), { align: AlignmentType.CENTER })],
+    }),
+  ]});
+
+  const bloc6 = new Table({
+    width: { size: CONTENT, type: WidthType.DXA },
+    columnWidths: [colGrp, colEff, colDate, colHd, colHf, colLieu],
+    rows: [headerRow, ...dataRows, pauseRow],
+  });
+
+  /* ── Document final ── */
+  const doc = new Document({
+    styles: { default: { document: { run: { font: "Arial", size: 20, color: BLACK } } } },
+    sections: [{
+      properties: {
+        page: {
+          size:   { width: PAGE_W, height: PAGE_H },
+          margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN },
+        },
+      },
+      children: [
+        mkPara(mkRun("Contrats Spéciaux de Formation", { size: 22, bold: true })),
+        mkPara(mkRun("Formulaire F2", { size: 22, bold: true }), { align: AlignmentType.CENTER, spacing: { before: 40, after: 0 } }),
+        new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: BLACK } }, spacing: { before: 40, after: 0 }, children: [] }),
+        mkPara(mkRun("Fiche d'identification de l'action de formation"), { align: AlignmentType.CENTER, spacing: { before: 60, after: 80 } }),
+        bloc1, spacer,
+        bloc2, spacer,
+        bloc3, spacer,
+        bloc4, spacer,
+        bloc5, spacer,
+        bloc6,
+      ],
+    }],
+  });
+
+  /* ── Téléchargement ── */
+  const blob = await Packer.toBlob(doc);
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `FicheTechnique_${(form.theme || "F2").replace(/\s+/g,"_")}.docx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 700, background: "rgba(0,0,0,0.55)",
@@ -9224,10 +10572,7 @@ function FicheTechniqueDesigner({ doc, candidats, tasks, onClose }) {
 </button>
           {/* Dans la TOP BAR, après le bouton Imprimer */}
 <button
-  onClick={() => exportToWord(
-    printRef.current?.innerHTML || "",
-    `FicheTechnique_${form.theme || "F2"}`
-  )}
+  onClick={() => exportFicheToWordInline(form, currentGroups, currentCandidats, groupsPerPage)}
   style={{
     display: "flex", alignItems: "center", gap: 6,
     padding: "7px 14px", borderRadius: 4,
@@ -11129,6 +12474,8 @@ export default function App() {
   const [allD, setAllD] = useState({});
   const { show: showToast, ToastContainer } = useToast();
   const { currentUser, updateProfile, logout } = useAuth();
+  const [globalYear, setGlobalYear] = useState(new Date().getFullYear());
+
 
   // ── Fermer la sidebar automatiquement quand on passe en mobile ──
   useEffect(() => {
@@ -11279,11 +12626,22 @@ export default function App() {
     }
   };
 
-  const updateWs = updatedRaw => {
-    const updated = norm(updatedRaw);
-    setWorkspaces(prev => prev.map(w => w.id === updated.id ? { ...w, ...updated } : w));
-  };
-
+  // Remplacez votre ancienne fonction updateWs par celle-ci :
+const updateWs = (updatedRaw) => {
+  const updated = norm(updatedRaw);
+  setWorkspaces((prev) => {
+    // On vérifie si le workspace existe déjà dans notre liste locale
+    const exists = prev.some((w) => w.id === updated.id);
+    
+    if (exists) {
+      // Si il existe, on le met à jour (comportement actuel)
+      return prev.map((w) => (w.id === updated.id ? { ...w, ...updated } : w));
+    } else {
+      // S'il n'existe pas (nouvelle année créée), on l'ajoute en haut de la liste
+      return [updated, ...prev];
+    }
+  });
+};
   const navLabel = NAV.find(n => n.key === section)?.label || (section === "profile" ? "Mon Profil" : "");
 
   // ── Largeur effective de la sidebar (0 sur mobile/tablet quand fermée) ──
@@ -11327,6 +12685,7 @@ export default function App() {
             setActiveWs(ws.id);
             return ws;
           }}
+          onUpdateWs={updateWs}
         />
       )}
 
@@ -11343,6 +12702,8 @@ export default function App() {
         apiOnline={apiOnline}
         currentUser={currentUser}
         onLogout={logout}
+        globalYear={globalYear}
+        onYearChange={setGlobalYear}
       />
 
       {/* ── Contenu principal ── */}
@@ -11436,6 +12797,9 @@ export default function App() {
               loading={wsDataLoading}
               onDeleteWs={deleteWs}
               onUpdateWs={updateWs}
+              onSelectWs={(id) => { setActiveWs(id); setSection("overview"); }} 
+              globalYear={globalYear}
+              onYearChange={setGlobalYear}
             />
           </div>
           <div style={{ display: section === "gantt" ? "block" : "none" }}>

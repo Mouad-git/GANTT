@@ -13,7 +13,6 @@ function AppContent() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 40%, #16213e 70%, #0f3460 100%)",
         fontFamily: "system-ui, sans-serif",
       }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
