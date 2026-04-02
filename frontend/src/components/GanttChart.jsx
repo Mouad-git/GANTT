@@ -6091,40 +6091,104 @@ function nextWorkingDay(date, wd, sh, vacs) {
   return snap(d2s(ad(pd(date), 1)), wd, sh, vacs);
 }
 
+
 function generateGantt() {
-  // ── Snapshot des paramètres au moment de la génération
-  const currentWd   = wd;        // ex: [0, 6] = dim + sam
-  const currentSh   = sh;        // true = fériés marocains exclus
-  const currentVacs = vacs;      // [{id, label, start, end}]
 
-  // ── Helpers locaux avec les bons paramètres capturés
-  const snapDate = (d) => snap(d, currentWd, currentSh, currentVacs);
-  const addWorkDays = (d, n) => addWD(d, n, currentWd, currentSh, currentVacs);
-  const nextWD = (d) => snapDate(d2s(ad(pd(d), 1)));
+  // ══════════════════════════════════════════════════════
+  // 0. CONSTANTES — fériés marocains 2025-2027
+  // ══════════════════════════════════════════════════════
+  const FERIES_MA = new Set([
+    // 2025
+    "2025-01-01","2025-01-11","2025-05-01","2025-06-06","2025-06-07",
+    "2025-07-30","2025-08-14","2025-08-20","2025-08-21",
+    "2025-09-04","2025-09-05","2025-11-06","2025-11-18",
+    // 2026
+    "2026-01-01","2026-01-11","2026-05-01","2026-05-27","2026-05-28",
+    "2026-07-30","2026-08-14","2026-08-20","2026-08-21",
+    "2026-08-25","2026-08-26","2026-11-06","2026-11-18",
+    // 2027
+    "2027-01-01","2027-01-11","2027-05-01","2027-05-16","2027-05-17",
+    "2027-07-30","2027-08-14","2027-08-15","2027-08-20","2027-08-21",
+    "2027-11-06","2027-11-18",
+  ]);
 
-  // ── Vérifie si une date est dans les vacances/congés
-  const isInVacation = (dateStr) => {
-    return currentVacs.some(v => dateStr >= v.start && dateStr <= v.end);
-  };
+  // ══════════════════════════════════════════════════════
+  // 1. SNAPSHOT des paramètres au moment de la génération
+  // ══════════════════════════════════════════════════════
+  const currentWd   = wd;        // ex: [0, 6] → dim + sam non ouvrés
+  const currentSh   = sh;        // true → exclure fériés marocains
+  const currentVacs = vacs;      // [{id, label, start:"YYYY-MM-DD", end:"YYYY-MM-DD"}]
 
-  // ── Vérifie si une date est dans l'intervalle du workspace
-  const isInWsRange = (dateStr) => {
-    if (wsStart && dateStr < wsStart) return false;
-    if (wsEnd   && dateStr > wsEnd)   return false;
+  // ══════════════════════════════════════════════════════
+  // 2. HELPERS LOCAUX — indépendants de addWD/snap globaux
+  // ══════════════════════════════════════════════════════
+
+  // Vérifie si une date (string YYYY-MM-DD) est un jour ouvré
+  const isWorkingDay = (dateStr) => {
+    const dow = pd(dateStr).getDay(); // 0=dim … 6=sam
+    if (currentWd.includes(dow))                          return false; // weekend
+    if (currentSh && FERIES_MA.has(dateStr))              return false; // férié
+    if (currentVacs.some(v => dateStr >= v.start && dateStr <= v.end)) return false; // congé
     return true;
   };
 
-  // ── Point de départ : premier jour ouvré dans l'intervalle WS
-  const rawStart = wsStart || d2s(new Date());
-  const startDay = snapDate(rawStart);
+  // Avance au prochain jour ouvré (le jour passé inclus si déjà ouvré)
+  const snapToWD = (dateStr) => {
+    let d = dateStr;
+    let s = 0;
+    while (!isWorkingDay(d) && s++ < 500) {
+      d = d2s(ad(pd(d), 1));
+    }
+    return d;
+  };
 
-  const wsEndDate = wsEnd || (() => {
-    const yr = startDay ? startDay.slice(0, 4) : new Date().getFullYear();
-    return `${yr}-12-31`;
-  })();
+  // Avance strictement au lendemain ouvré
+  const nextWorkingDay = (dateStr) => {
+    return snapToWD(d2s(ad(pd(dateStr), 1)));
+  };
 
-  // ── 1. Construire la map des groupes
+  // Ajoute n jours ouvrés à une date de début (le début = jour 1)
+  // ex: addWDStrict("2026-07-29", 5) → 5ème jour ouvré en comptant le 29
+  const addWDStrict = (startStr, nbJours) => {
+    if (nbJours <= 1) return startStr;
+    let current = pd(startStr);
+    let counted = 1; // le jour de début compte comme jour 1
+    let safety  = 0;
+    while (counted < nbJours && safety++ < 500) {
+      current = ad(current, 1);
+      if (isWorkingDay(d2s(current))) counted++;
+    }
+    return d2s(current);
+  };
+
+  // Trouve le premier jour ouvré dans l'intervalle WS à partir de `from`
+  const findFirstFreeDay = (from) => {
+    let d = snapToWD(from);
+    let s = 0;
+    while (s++ < 730) {
+      // Doit être dans l'intervalle WS (si défini)
+      if (wsStart && d < wsStart) { d = snapToWD(wsStart); continue; }
+      if (isWorkingDay(d))        return d;
+      d = nextWorkingDay(d);
+    }
+    return d;
+  };
+
+  // ══════════════════════════════════════════════════════
+  // 3. INTERVALLE DU WORKSPACE
+  // ══════════════════════════════════════════════════════
+  const rawStart  = wsStart || d2s(new Date());
+  const startDay  = findFirstFreeDay(rawStart);
+  const wsEndDate = wsEnd || `${startDay.slice(0, 4)}-12-31`;
+
+  const isInRange = (dateStr) =>
+    (!wsStart || dateStr >= wsStart) && dateStr <= wsEndDate;
+
+  // ══════════════════════════════════════════════════════
+  // 4. CONSTRUCTION DE LA MAP DES GROUPES
+  // ══════════════════════════════════════════════════════
   const groupsMap = new Map();
+
   result.forEach(r => {
     const k = `${r.theme.trim()}||${r.groupe}`;
     if (!groupsMap.has(k)) {
@@ -6133,7 +6197,7 @@ function generateGantt() {
         groupe:       String(r.groupe),
         heures:       r.heures,
         jours:        r.jours || 1,
-        slots:        hrs2slots(r.heures),
+        slots:        hrs2slots(r.heures),       // 1 = demi-journée, >1 = full-day
         hasPreDates:  !!(r.start && r.start.length === 10),
         preDateDebut: r.start || "",
         preDateFin:   r.end   || "",
@@ -6143,8 +6207,8 @@ function generateGantt() {
         candidatKeys: [],
       });
     }
-    // Accumuler les clés candidats
-    const g = groupsMap.get(k);
+    // Accumuler les clés candidats (par matricule ou nom+prénom)
+    const g   = groupsMap.get(k);
     const mat = (r.matricule || "").trim().toLowerCase();
     const vM  = mat.length > 3 && mat !== "en cours de recrutement";
     const ck  = vM
@@ -6154,37 +6218,45 @@ function generateGantt() {
   });
 
   const all   = Array.from(groupsMap.values());
-  const prePl = all.filter(g => g.hasPreDates);
-  const toSch = all.filter(g => !g.hasPreDates);
+  const prePl = all.filter(g => g.hasPreDates);  // dates fixées par l'utilisateur
+  const toSch = all.filter(g => !g.hasPreDates); // à planifier automatiquement
 
-  // ── 2. Registres temps-réel
-  const plannedByLieu   = {};  // lieuKey → [{start,end,halfDay,slot,themeGroupe}]
-  const candidatReg     = {};  // candidatKey → [{themeGroupe,start,end,halfDay,slot}]
+  // ══════════════════════════════════════════════════════
+  // 5. REGISTRES TEMPS-RÉEL (détection de conflits live)
+  // ══════════════════════════════════════════════════════
+  // plannedByLieu[lieuKey] = [{ start, end, halfDay, slot, themeGroupe, capacity }]
+  const plannedByLieu = {};
+  // candidatReg[candidatKey] = [{ themeGroupe, start, end, halfDay, slot }]
+  const candidatReg   = {};
 
-  const registerTask = (lieuKey, themeGroupe, start, end, halfDay, slot, candidatKeys) => {
+  const registerTask = (lieuKey, themeGroupe, start, end, halfDay, slot, candidatKeys, capacity) => {
     if (!plannedByLieu[lieuKey]) plannedByLieu[lieuKey] = [];
-    plannedByLieu[lieuKey].push({ start, end, halfDay, slot, themeGroupe });
+    plannedByLieu[lieuKey].push({ start, end, halfDay, slot, themeGroupe, capacity });
     for (const ck of candidatKeys) {
       if (!candidatReg[ck]) candidatReg[ck] = [];
       candidatReg[ck].push({ themeGroupe, start, end, halfDay, slot });
     }
   };
 
-  // ── 3. Vérif conflit lieu (overlap en tenant compte capacité)
+  // ══════════════════════════════════════════════════════
+  // 6. DÉTECTION DE CONFLITS
+  // ══════════════════════════════════════════════════════
+
+  // Conflit de lieu : vérifie si ajouter un groupe dépasse la capacité du lieu
   const hasLieuConflict = (start, end, halfDay, slot, lieuKey, capacity) => {
     const peers = plannedByLieu[lieuKey] || [];
-    // Compter les groupes simultanés
     const simultaneous = peers.filter(p => {
       if (!p.start) return false;
       const overlap = p.start <= end && p.end >= start;
       if (!overlap) return false;
+      // Deux demi-journées sur des créneaux différents → pas de conflit
       if (halfDay && p.halfDay && slot !== p.slot) return false;
       return true;
     }).length;
-    return simultaneous >= capacity; // conflit si on dépasse la capacité
+    return simultaneous >= capacity;
   };
 
-  // ── 4. Vérif conflit candidat
+  // Conflit candidat : un même candidat dans deux formations simultanées
   const hasCandidatConflict = (candidatKeys, themeGroupe, start, end, halfDay, slot) => {
     for (const ck of candidatKeys) {
       const sessions = candidatReg[ck] || [];
@@ -6199,27 +6271,27 @@ function generateGantt() {
     return false;
   };
 
-  // ── 5. Trouve la prochaine date candidate libre (post-snap)
-  //    Avance jusqu'à trouver un jour qui :
-  //    - est ouvré (snap le garantit)
-  //    - est dans l'intervalle WS
-  //    - n'est PAS dans une période de vacances/congé
-  const findNextFreeDate = (fromDate) => {
-    let d = snapDate(fromDate);
-    let safety = 0;
-    while (safety++ < 730) {
-      // snap gère déjà weekends + fériés, mais on re-vérifie les vacances
-      // au cas où snap ne les gèrerait pas parfaitement
-      if (!isInVacation(d) && isInWsRange(d)) return d;
-      d = nextWD(d);
+  // Vérifie qu'une plage (start → end) ne traverse pas une période de congé
+  // et que le end lui-même est un jour ouvré
+  const rangeIsClean = (start, end) => {
+    // La fin doit être un jour ouvré
+    if (!isWorkingDay(end)) return false;
+    // Aucun jour de congé ne doit couper la plage
+    // (les weekends/fériés sont OK s'ils sont entre deux jours ouvrés)
+    // On vérifie que start et end sont cohérents avec isWorkingDay
+    for (const vac of currentVacs) {
+      // La formation chevauche la vacation si elle commence avant la fin
+      // et finit après le début de la vacation
+      if (start <= vac.end && end >= vac.start) return false;
     }
-    return d; // fallback
+    return true;
   };
 
+  // ══════════════════════════════════════════════════════
+  // 7. ENREGISTREMENT DES GROUPES PRÉ-PLANIFIÉS (priorité absolue)
+  // ══════════════════════════════════════════════════════
   const newTasks = [];
-  const MAX_ITER = 730;
 
-  // ── 6. Enregistrer les pré-planifiés en premier
   for (const g of prePl) {
     const lieuKey     = [g.lieu, g.cabinet].filter(Boolean).join("||") || "default";
     const themeGroupe = `${g.theme}||${g.groupe}`;
@@ -6227,15 +6299,22 @@ function generateGantt() {
     const end         = g.preDateFin || g.preDateDebut;
 
     newTasks.push({
-      id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
-      group: g.theme, groupe: g.groupe,
-      start, end, halfDay: g.slots === 1, slot: null,
-      _key: themeGroupe,
+      id:      uid(),
+      name:    `${g.theme} — Grp ${g.groupe}`,
+      group:   g.theme,
+      groupe:  g.groupe,
+      start,
+      end,
+      halfDay: g.slots === 1,
+      slot:    null,
+      _key:    themeGroupe,
     });
-    registerTask(lieuKey, themeGroupe, start, end, g.slots === 1, null, g.candidatKeys);
+    registerTask(lieuKey, themeGroupe, start, end, g.slots === 1, null, g.candidatKeys, g.nbrEspace);
   }
 
-  // ── 7. Grouper les groupes à planifier par lieu
+  // ══════════════════════════════════════════════════════
+  // 8. GROUPEMENT PAR LIEU DES GROUPES À PLANIFIER
+  // ══════════════════════════════════════════════════════
   const byLieu = {};
   for (const g of toSch) {
     const lieuKey = [g.lieu, g.cabinet].filter(Boolean).join("||") || "default";
@@ -6245,12 +6324,17 @@ function generateGantt() {
     else               byLieu[lieuKey].fulls.push(g);
   }
 
-  // ── 8. Planifier full-day avec backtracking complet
+  const MAX_ITER = 730; // sécurité anti-boucle infinie (2 ans max)
+
+  // ══════════════════════════════════════════════════════
+  // 9. PLANIFICATION FULL-DAY avec backtracking
+  // ══════════════════════════════════════════════════════
   for (const [lieuKey, { nbrEspace, fulls }] of Object.entries(byLieu)) {
     const nFiles      = Math.max(1, nbrEspace);
-    // Initialiser les curseurs au premier jour libre dans l'intervalle WS
-    const fileCursors = Array.from({ length: nFiles }, () => findNextFreeDate(startDay));
+    // Un curseur par "espace parallèle" du lieu, initialisé au 1er jour libre
+    const fileCursors = Array.from({ length: nFiles }, () => findFirstFreeDay(startDay));
 
+    // Retourne l'index du fichier avec le curseur le plus tôt
     const bestFileIdx = () => {
       let b = 0;
       for (let f = 1; f < nFiles; f++) {
@@ -6265,73 +6349,107 @@ function generateGantt() {
       let   placed      = false;
       let   iter        = 0;
 
-      while (!placed && iter < MAX_ITER) {
-        iter++;
-        const fi               = bestFileIdx();
-        // S'assurer que le curseur est sur un jour libre (pas vacances, dans WS)
-        fileCursors[fi]        = findNextFreeDate(fileCursors[fi]);
-        const candidateStart   = fileCursors[fi];
-        // addWD saute déjà les weekends + fériés + vacances
-        const candidateEnd     = addWorkDays(candidateStart, nb - 1);
+      while (!placed && iter++ < MAX_ITER) {
 
-        // Forcer placement même hors-range (sera signalé en conflit visuel)
+        const fi = bestFileIdx();
+
+        // S'assurer que le curseur est bien sur un jour ouvré dans l'intervalle
+        fileCursors[fi] = findFirstFreeDay(fileCursors[fi]);
+
+        const candidateStart = fileCursors[fi];
+
+        // Si on dépasse l'intervalle WS → placer quand même (signalé visuellement)
         if (candidateStart > wsEndDate) {
+          const candidateEnd = addWDStrict(candidateStart, nb);
           newTasks.push({
             id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
             group: g.theme, groupe: g.groupe,
             start: candidateStart, end: candidateEnd,
             halfDay: false, slot: null, _key: themeGroupe,
           });
-          registerTask(lieuKey, themeGroupe, candidateStart, candidateEnd, false, null, g.candidatKeys);
-          fileCursors[fi] = findNextFreeDate(nextWD(candidateEnd));
+          registerTask(lieuKey, themeGroupe, candidateStart, candidateEnd, false, null, g.candidatKeys, nFiles);
+          fileCursors[fi] = findFirstFreeDay(nextWorkingDay(candidateEnd));
           placed = true;
           break;
         }
 
-        const lieuConflict  = hasLieuConflict(candidateStart, candidateEnd, false, null, lieuKey, nFiles);
-        const candConflict  = hasCandidatConflict(g.candidatKeys, themeGroupe, candidateStart, candidateEnd, false, null);
+        // Calculer la date de fin en sautant weekends + fériés + congés
+        const candidateEnd = addWDStrict(candidateStart, nb);
 
-        if (!lieuConflict && !candConflict) {
+        // ── Vérifications complètes ──────────────────────────
+        const lieuOk  = !hasLieuConflict(candidateStart, candidateEnd, false, null, lieuKey, nFiles);
+        const candOk  = !hasCandidatConflict(g.candidatKeys, themeGroupe, candidateStart, candidateEnd, false, null);
+        const rangeOk = rangeIsClean(candidateStart, candidateEnd);
+        const endOk   = candidateEnd <= wsEndDate;
+
+        if (lieuOk && candOk && rangeOk && endOk) {
+          // ✅ Créneau valide → placer
           newTasks.push({
             id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
             group: g.theme, groupe: g.groupe,
             start: candidateStart, end: candidateEnd,
             halfDay: false, slot: null, _key: themeGroupe,
           });
-          registerTask(lieuKey, themeGroupe, candidateStart, candidateEnd, false, null, g.candidatKeys);
-          fileCursors[fi] = findNextFreeDate(nextWD(candidateEnd));
+          registerTask(lieuKey, themeGroupe, candidateStart, candidateEnd, false, null, g.candidatKeys, nFiles);
+          fileCursors[fi] = findFirstFreeDay(nextWorkingDay(candidateEnd));
           placed = true;
+
+        } else if (!rangeOk) {
+          // ❌ La plage traverse une vacation → sauter au premier jour après la vacation
+          let bestSkip = nextWorkingDay(candidateStart);
+          for (const vac of currentVacs) {
+            if (candidateStart <= vac.end && candidateEnd >= vac.start) {
+              // Sauter directement après la fin du congé
+              const afterVac = findFirstFreeDay(d2s(ad(pd(vac.end), 1)));
+              if (afterVac > bestSkip) bestSkip = afterVac;
+            }
+          }
+          fileCursors[fi] = bestSkip;
+
+        } else if (!endOk) {
+          // ❌ Fin hors intervalle → impossible, on place hors-range
+          newTasks.push({
+            id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
+            group: g.theme, groupe: g.groupe,
+            start: candidateStart, end: candidateEnd,
+            halfDay: false, slot: null, _key: themeGroupe,
+          });
+          registerTask(lieuKey, themeGroupe, candidateStart, candidateEnd, false, null, g.candidatKeys, nFiles);
+          fileCursors[fi] = findFirstFreeDay(nextWorkingDay(candidateEnd));
+          placed = true;
+
         } else {
-          // Conflit → avancer d'un jour ouvré (sauter weekends/fériés/vacances)
-          fileCursors[fi] = findNextFreeDate(nextWD(fileCursors[fi]));
+          // ❌ Conflit lieu ou candidat → avancer d'un jour ouvré
+          fileCursors[fi] = findFirstFreeDay(nextWorkingDay(candidateStart));
         }
       }
     }
   }
 
-  // ── 9. Planifier demi-journées avec gestion stricte AM/PM
+  // ══════════════════════════════════════════════════════
+  // 10. PLANIFICATION DEMI-JOURNÉES
+  // ══════════════════════════════════════════════════════
   for (const [lieuKey, { halves }] of Object.entries(byLieu)) {
-    let cursor = findNextFreeDate(startDay);
 
-    // Vérifie si un slot (matin ou après-midi) est libre sur une date
-    const isSlotFree = (date, slot) => {
+    let cursor  = findFirstFreeDay(startDay);
+    let safety  = 0;
+    let i       = 0;
+
+    // Vérifie si un slot AM ou PM est libre sur une date donnée pour ce lieu
+    const isSlotAvailable = (dateStr, slot) => {
       const peers = plannedByLieu[lieuKey] || [];
       return !peers.some(p => {
-        const overlap = p.start <= date && p.end >= date;
+        const overlap = p.start <= dateStr && p.end >= dateStr;
         if (!overlap) return false;
-        // Un groupe full-day bloque tous les slots
-        if (!p.halfDay) return true;
-        // Un groupe half-day bloque seulement son slot
-        return p.slot === slot;
+        if (!p.halfDay) return true;           // full-day bloque tout
+        return p.slot === slot;                // half-day bloque son créneau
       });
     };
 
-    let i = 0;
-    let safety = 0;
+    while (i < halves.length && safety++ < MAX_ITER * halves.length) {
 
-    while (i < halves.length && safety < MAX_ITER * halves.length) {
-      safety++;
-      cursor = findNextFreeDate(cursor); // garantit: ouvré + dans WS + pas en vacances
+      // Garantir : cursor est ouvré + dans intervalle + pas en congé
+      cursor = findFirstFreeDay(cursor);
 
       if (cursor > wsEndDate) {
         // Placer hors-range
@@ -6343,25 +6461,26 @@ function generateGantt() {
           start: cursor, end: cursor,
           halfDay: true, slot: "matin", _key: themeGroupe,
         });
-        registerTask(lieuKey, themeGroupe, cursor, cursor, true, "matin", g.candidatKeys);
+        registerTask(lieuKey, themeGroupe, cursor, cursor, true, "matin", g.candidatKeys, 1);
         i++;
-        cursor = findNextFreeDate(nextWD(cursor));
+        cursor = findFirstFreeDay(nextWorkingDay(cursor));
         continue;
       }
 
-      let placedOnThisDay = false;
+      let placedOnDay = false;
 
+      // Essayer AM puis PM sur la date courante
       for (const slot of ["matin", "après-midi"]) {
         if (i >= halves.length) break;
-
-        if (!isSlotFree(cursor, slot)) continue;
+        if (!isSlotAvailable(cursor, slot)) continue;
 
         const g           = halves[i];
         const themeGroupe = `${g.theme}||${g.groupe}`;
-        const candConflict = hasCandidatConflict(
+
+        const candOk = !hasCandidatConflict(
           g.candidatKeys, themeGroupe, cursor, cursor, true, slot
         );
-        if (candConflict) continue;
+        if (!candOk) continue; // essayer l'autre slot
 
         newTasks.push({
           id: uid(), name: `${g.theme} — Grp ${g.groupe}`,
@@ -6369,24 +6488,26 @@ function generateGantt() {
           start: cursor, end: cursor,
           halfDay: true, slot, _key: themeGroupe,
         });
-        registerTask(lieuKey, themeGroupe, cursor, cursor, true, slot, g.candidatKeys);
+        registerTask(lieuKey, themeGroupe, cursor, cursor, true, slot, g.candidatKeys, 1);
         i++;
-        placedOnThisDay = true;
+        placedOnDay = true;
       }
 
-      // Passer au jour suivant dans tous les cas
-      // (qu'on ait placé 0, 1 ou 2 groupes sur ce jour)
-      cursor = findNextFreeDate(nextWD(cursor));
+      // Toujours passer au jour suivant après avoir traité ce jour
+      cursor = findFirstFreeDay(nextWorkingDay(cursor));
     }
   }
 
-  // ── 10. Appliquer et notifier
+  // ══════════════════════════════════════════════════════
+  // 11. APPLICATION DES RÉSULTATS
+  // ══════════════════════════════════════════════════════
   let outOfRange = 0;
   newTasks.forEach(t => { if (t.end > wsEndDate) outOfRange++; });
 
   const nLieux     = Object.keys(byLieu).length;
   const totalFiles = Object.values(byLieu).reduce((s, l) => s + Math.max(1, l.nbrEspace), 0);
 
+  // Mapper les nouvelles dates sur result
   const taskMap = {};
   newTasks.forEach(t => { taskMap[t._key] = t; });
 
@@ -6405,14 +6526,17 @@ function generateGantt() {
   setGanttDone(true);
   batchTasksRef.current = newTasks.map(({ _key, ...t }) => t);
 
+  // ══════════════════════════════════════════════════════
+  // 12. NOTIFICATION
+  // ══════════════════════════════════════════════════════
   if (outOfRange > 0) {
     showToast(
-      `⚠ ${outOfRange} groupe(s) dépassent le ${fmt(wsEndDate)} — ${nLieux} lieu(x) · ${totalFiles} espace(s). Élargissez l'intervalle.`,
+      `⚠ ${outOfRange} groupe(s) dépassent le ${fmt(wsEndDate)} — ${nLieux} lieu(x) · ${totalFiles} espace(s) parallèle(s). Élargissez l'intervalle ou augmentez la capacité des lieux.`,
       "error"
     );
   } else {
     showToast(
-      `✓ ${newTasks.length} groupe(s) planifiés — ${nLieux} lieu(x) · ${totalFiles} espace(s)`,
+      `✓ ${newTasks.length} groupe(s) planifiés sans conflit — ${nLieux} lieu(x) · ${totalFiles} espace(s) parallèle(s)`,
       "success"
     );
   }
